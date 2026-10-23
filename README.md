@@ -102,17 +102,13 @@ Paste the following into your device's ESPHome YAML (after the `packages:` line)
 Place the accompanying `voice_alarms.h` file in the same directory.
 
 ```yaml
-# -------------------------------------------------
-# Voice Alarms ESPHome snippet for Home Assistant Voice PE
-# Paste this into your device YAML (after the `packages:` line)
-# -------------------------------------------------
+# Voice Alarms – ESPHome snippet for Home Assistant Voice PE
+# Paste after the `packages:` line; place `voice_alarms.h` next to this YAML
 
-# 1️⃣  Include the C++ struct definition (place voice_alarms.h next to this YAML)
 esphome:
   includes:
     - voice_alarms.h
 
-# 2️⃣  Accurate clock (SNTP)
 time:
   - platform: sntp
     id: va_clock
@@ -120,13 +116,11 @@ time:
       - pool.ntp.org
     timezone: "America/Los_Angeles"
 
-# 3️⃣  Alarm store (vector of VaAlarm)
 globals:
   - id: va_alarms
     type: "std::vector<VaAlarm>"
     restore_value: false
 
-# 4️⃣  Play a tone on the existing speaker (id `speaker` from the Voice PE package)
 script:
   - id: va_play_tone
     parameters:
@@ -137,7 +131,6 @@ script:
           media_url: "tone_{{ tone_id }}.wav"
           volume: 0.8
 
-# 5️⃣  Every minute: fire any due alarms
 interval:
   - interval: 60s
     then:
@@ -146,24 +139,21 @@ interval:
           for (auto &a : id(va_alarms)) {
             bool match = (a.hour == now.hour && a.minute == now.minute);
             if (!match) continue;
-
-            if (a.repeat_mask == 0) {                 // one-shot
+            if (a.repeat_mask == 0) {
               match = true;
-            } else {                                   // recurring
-              uint8_t wday = now.day_of_week;          // 0=Sun … 6=Sat
+            } else {
+              uint8_t wday = now.day_of_week;
               match = (a.repeat_mask & (1 << wday)) != 0;
             }
-
             if (match) {
               id(va_play_tone).execute(a.tone);
-              if (a.repeat_mask == 0) {                // remove one-shot
+              if (a.repeat_mask == 0) {
                 a = id(va_alarms).back();
                 id(va_alarms).pop_back();
               }
             }
           }
 
-# 6️⃣  Hook the voice-assistant "set alarm" intent
 voice_assistant:
   on_alarm_set:
     - lambda: |
@@ -174,7 +164,6 @@ voice_assistant:
         a.tone         = /* tone slot (0,1,2…) */;
         id(va_alarms).push_back(a);
 
-# 7️⃣  Diagnostic sensor – HA integration reads this
 binary_sensor:
   - platform: template
     name: "Voice Alarms Local Supported"
