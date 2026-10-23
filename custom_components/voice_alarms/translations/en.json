@@ -1,0 +1,33 @@
+"""Translations for Voice Alarms."""
+
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Voice Alarms Setup",
+        "description": "Configure per-device voice alarms for Home Assistant Assist",
+        "data": {
+          "max_ring_time": "Maximum ring time (minutes)",
+          "voice_pe_device_id": "Voice PE Device ID",
+          "bedroom_echo_device_id": "Bedroom Echo Device ID"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Voice Alarms is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Voice Alarms Options",
+        "description": "Update Voice Alarms configuration",
+        "data": {
+          "max_ring_time": "Maximum ring time (minutes)",
+          "voice_pe_device_id": "Voice PE Device ID",
+          "bedroom_echo_device_id": "Bedroom Echo Device ID"
+        }
+      }
+    }
+  }
+}

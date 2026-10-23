@@ -1,0 +1,160 @@
+blueprint:
+  name: "Voice Alarm: Ring"
+  description: "Every minute, rings any due alarm on its satellite until stopped (configurable max). One-time alarms removed when they fire."
+  domain: automation
+  input:
+    voice_alarms_text:
+      name: "Voice Alarms Text Helper"
+      description: "The input_text helper storing alarms (HH:MM<repeat><device>)"
+      selector:
+        entity:
+          domain: input_text
+    voice_pe_ringing:
+      name: "Voice PE Ringing Flag"
+      description: "input_boolean for Voice PE alarm ringing state"
+      selector:
+        entity:
+          domain: input_boolean
+    bedroom_echo_ringing:
+      name: "Bedroom Echo Ringing Flag"
+      description: "input_boolean for Bedroom Echo alarm ringing state"
+      selector:
+        entity:
+          domain: input_boolean
+    voice_pe_satellite:
+      name: "Voice PE Satellite"
+      description: "The assist_satellite entity for Voice PE"
+      selector:
+        entity:
+          domain: assist_satellite
+    bedroom_echo_satellite:
+      name: "Bedroom Echo Satellite"
+      description: "The assist_satellite entity for Bedroom Echo"
+      selector:
+        entity:
+          domain: assist_satellite
+    max_ring_time:
+      name: "Max Ring Time (minutes)"
+      description: "Maximum time an alarm rings before auto-stop"
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 120
+          step: 1
+          mode: box
+
+trigger:
+  - platform: time_pattern
+    minutes: "/1"
+
+action:
+  - variables:
+      items: >
+        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') | list }}
+      wd: "{{ now().weekday() }}"
+      max_seconds: "{{ max_ring_time * 60 }}"
+
+  - variables:
+      due_voice: >
+        {% set hhmm = now().strftime('%H:%M') %}
+        {% set ns = namespace(d=[]) %}
+        {% for i in items %}
+          {% if i[:5] == hhmm and i[6:7] == 'V' and
+              (i[5:6] in ['o','d'] or
+               (i[5:6] == 'w' and wd | int(0) < 5) or
+               (i[5:6] == 'e' and wd | int(0) >= 5)) %}
+            {% set ns.d = ns.d + [i] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.d }}
+      due_echo: >
+        {% set hhmm = now().strftime('%H:%M') %}
+        {% set ns = namespace(d=[]) %}
+        {% for i in items %}
+          {% if i[:5] == hhmm and i[6:7] == 'E' and
+              (i[5:6] in ['o','d'] or
+               (i[5:6] == 'w' and wd | int(0) < 5) or
+               (i[5:6] == 'e' and wd | int(0) >= 5)) %}
+            {% set ns.d = ns.d + [i] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.d }}
+
+  - stop: "none due"
+    if:
+      - "{{ due_voice | length == 0 and due_echo | length == 0 }}"
+
+  - service: input_text.set_value
+    target:
+      entity_id: !input voice_alarms_text
+    data:
+      value: >
+        {% set ns = namespace(k=[]) %}
+        {% for i in items %}
+          {% if not ((i in due_voice or i in due_echo) and i[5:6] == 'o') %}
+            {% set ns.k = ns.k + [i] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.k | join(',') }}
+
+  - variables:
+      started: "{{ as_timestamp(now()) }}"
+
+  - parallel:
+      - sequence:
+          - if:
+              - "{{ due_voice | length > 0 }}"
+            then:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: !input voice_pe_ringing
+              - repeat:
+                  sequence:
+                    - service: assist_satellite.announce
+                      target:
+                        entity_id: !input voice_pe_satellite
+                      data:
+                        message: "Alarm. It is {{ now().strftime('%-I:%M %p') }}. Say stop alarm to turn it off."
+                      continue_on_error: true
+                    - delay:
+                        seconds: 8
+                  while:
+                    - condition: state
+                      entity_id: !input voice_pe_ringing
+                      state: "on"
+                    - condition: template
+                      value_template: "{{ as_timestamp(now()) - (started | float(0)) < max_seconds }}"
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: !input voice_pe_ringing
+
+      - sequence:
+          - if:
+              - "{{ due_echo | length > 0 }}"
+            then:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: !input bedroom_echo_ringing
+              - repeat:
+                  sequence:
+                    - service: assist_satellite.announce
+                      target:
+                        entity_id: !input bedroom_echo_satellite
+                      data:
+                        message: "Alarm. It is {{ now().strftime('%-I:%M %p') }}. Say stop alarm to turn it off."
+                      continue_on_error: true
+                    - delay:
+                        seconds: 8
+                  while:
+                    - condition: state
+                      entity_id: !input bedroom_echo_ringing
+                      state: "on"
+                    - condition: template
+                      value_template: "{{ as_timestamp(now()) - (started | float(0)) < max_seconds }}"
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: !input bedroom_echo_ringing
+
+mode: parallel
+max_exceeded: silent
