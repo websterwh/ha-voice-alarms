@@ -12,7 +12,13 @@ from .const import (
     DOMAIN,
     CONF_MAX_RING_TIME,
     CONF_SATELLITE_DEVICES,
+    CONF_ALARM_MODE,
+    CONF_TONE_BASE_URL,
     DEFAULT_MAX_RING_TIME,
+    DEFAULT_ALARM_MODE,
+    DEFAULT_TONE_BASE_URL,
+    ALARM_MODE_HA_FALLBACK,
+    ALARM_MODE_LOCAL_PREFERRED,
 )
 
 
@@ -50,6 +56,26 @@ class VoiceAlarmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         options=satellite_options,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                         multiple=True,
+                    )
+                ),
+                vol.Required(
+                    CONF_ALARM_MODE,
+                    default=DEFAULT_ALARM_MODE,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(value=ALARM_MODE_HA_FALLBACK, label="HA Fallback (blueprint rings)"),
+                            selector.SelectOptionDict(value=ALARM_MODE_LOCAL_PREFERRED, label="Local Preferred (device rings locally)"),
+                        ],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_TONE_BASE_URL,
+                    default=DEFAULT_TONE_BASE_URL,
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.URL,
                     )
                 ),
             }
@@ -106,6 +132,26 @@ class VoiceAlarmsOptionsFlow(config_entries.OptionsFlow):
                         options=satellite_options,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                         multiple=True,
+                    )
+                ),
+                vol.Required(
+                    CONF_ALARM_MODE,
+                    default=self.config_entry.data.get(CONF_ALARM_MODE, DEFAULT_ALARM_MODE),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(value=ALARM_MODE_HA_FALLBACK, label="HA Fallback (blueprint rings)"),
+                            selector.SelectOptionDict(value=ALARM_MODE_LOCAL_PREFERRED, label="Local Preferred (device rings locally)"),
+                        ],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_TONE_BASE_URL,
+                    default=self.config_entry.data.get(CONF_TONE_BASE_URL, DEFAULT_TONE_BASE_URL),
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.URL,
                     )
                 ),
             }

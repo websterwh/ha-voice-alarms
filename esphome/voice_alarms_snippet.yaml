@@ -1,0 +1,69 @@
+time:
+  - platform: sntp
+    id: va_clock
+    servers:
+      - pool.ntp.org
+    timezone: "America/Los_Angeles"
+
+globals:
+  - id: va_alarms
+    type: "std::vector<VaAlarm>"
+    restore_value: false
+
+audio_dac:
+  - platform: i2s
+    id: va_dac
+
+speaker:
+  - platform: i2s_audio
+    id: va_speaker
+    dac: va_dac
+
+script:
+  - id: va_play_tone
+    parameters:
+      tone_id: int
+    then:
+      - speaker.play:
+          media_url: "tone_{{ tone_id }}.wav"
+          volume: 0.8
+
+interval:
+  - interval: 60s
+    then:
+      - lambda: |
+          auto now = id(va_clock).now();
+          for (auto &a : id(va_alarms)) {
+            bool match = (a.hour == now.hour && a.minute == now.minute);
+            if (!match) continue;
+            if (a.repeat_mask == 0) {
+              match = true;
+            } else {
+              uint8_t wday = now.day_of_week;
+              match = (a.repeat_mask & (1 << wday)) != 0;
+            }
+            if (match) {
+              id(va_play_tone).execute(a.tone);
+              if (a.repeat_mask == 0) {
+                a = id(va_alarms).back();
+                id(va_alarms).pop_back();
+              }
+            }
+          }
+
+voice_assistant:
+  on_alarm_set:
+    - lambda: |
+        VaAlarm a;
+        a.hour = /* hour slot */;
+        a.minute = /* minute slot */;
+        a.repeat_mask = /* compute from repeat slot */;
+        a.tone = /* tone slot */;
+        id(va_alarms).push_back(a);
+
+binary_sensor:
+  - platform: template
+    name: "Voice Alarms Local Supported"
+    id: voice_alarms_local_supported
+    lambda: "return true;"
+    entity_category: "diagnostic"
