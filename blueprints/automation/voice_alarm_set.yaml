@@ -5,7 +5,7 @@ blueprint:
   input:
     voice_alarms_text:
       name: "Voice Alarms Text Helper"
-      description: "The input_text helper storing alarms (HH:MM<repeat><device>)"
+      description: "The input_text helper storing alarms (HH:MM<repeat><device_index>)"
       selector:
         entity:
           domain: input_text
@@ -15,16 +15,13 @@ blueprint:
       selector:
         entity:
           domain: script
-    voice_pe_device_id:
-      name: "Voice PE Device ID"
-      description: "Device ID for Voice PE satellite"
+    satellite_devices:
+      name: "Satellite Devices"
+      description: "List of assist_satellite entity IDs in priority order"
       selector:
-        text:
-    bedroom_echo_device_id:
-      name: "Bedroom Echo Device ID"
-      description: "Device ID for Bedroom Echo satellite"
-      selector:
-        text:
+        entity:
+          domain: assist_satellite
+          multiple: true
     max_ring_time:
       name: "Max Ring Time (minutes)"
       description: "Maximum time an alarm rings before auto-stop"
@@ -35,10 +32,6 @@ blueprint:
           max: 120
           step: 1
           mode: box
-
-variables:
-  voice_pe_device_id: !input voice_pe_device_id
-  bedroom_echo_device_id: !input bedroom_echo_device_id
 
 trigger:
   - platform: conversation
@@ -68,16 +61,17 @@ action:
         {% elif 'weekend' in t %}e
         {% elif 'daily' in t or 'every day' in t or 'everyday' in t or 'recurring' in t or 'repeating' in t %}d
         {% else %}o{% endif %}
-      device_code: >
+      device_index: >
+        {% set satellites = satellite_devices %}
         {% set did = trigger.device_id %}
-        {% if did == voice_pe_device_id %}V
-        {% elif did == bedroom_echo_device_id %}E
-        {% else %}{% endif %}
+        {% for i in range(satellites | length) %}
+          {% if satellites[i] == did %}{{ i }}{% endif %}
+        {% endfor %}
       items: >
-        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') | list }}
+        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | list }}
 
   - variables:
-      entry: "{{ parsed.hhmm ~ repeat_code ~ device_code }}"
+      entry: "{{ parsed.hhmm ~ repeat_code ~ device_index }}"
       label: >
         {{ today_at(parsed.hhmm).strftime('%-I:%M %p') }}
         {{
@@ -86,7 +80,7 @@ action:
 
   - stop: "Say that to a voice device."
     if:
-      - "{{ device_code == '' }}"
+      - "{{ device_index | string == '' }}"
 
   - stop: "That alarm is already set."
     if:

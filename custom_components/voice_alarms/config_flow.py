@@ -11,11 +11,8 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN,
     CONF_MAX_RING_TIME,
-    CONF_VOICE_PE_DEVICE_ID,
-    CONF_BEDROOM_ECHO_DEVICE_ID,
+    CONF_SATELLITE_DEVICES,
     DEFAULT_MAX_RING_TIME,
-    DEFAULT_VOICE_PE_DEVICE_ID,
-    DEFAULT_BEDROOM_ECHO_DEVICE_ID,
 )
 
 
@@ -48,22 +45,11 @@ class VoiceAlarmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=1, max=120, step=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
-                vol.Required(
-                    CONF_VOICE_PE_DEVICE_ID,
-                    default=DEFAULT_VOICE_PE_DEVICE_ID,
-                ): selector.SelectSelector(
+                vol.Required(CONF_SATELLITE_DEVICES): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=satellite_options,
                         mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Required(
-                    CONF_BEDROOM_ECHO_DEVICE_ID,
-                    default=DEFAULT_BEDROOM_ECHO_DEVICE_ID,
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=satellite_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
                     )
                 ),
             }
@@ -113,21 +99,13 @@ class VoiceAlarmsOptionsFlow(config_entries.OptionsFlow):
                     )
                 ),
                 vol.Required(
-                    CONF_VOICE_PE_DEVICE_ID,
-                    default=self.config_entry.data.get(CONF_VOICE_PE_DEVICE_ID, DEFAULT_VOICE_PE_DEVICE_ID),
+                    CONF_SATELLITE_DEVICES,
+                    default=self.config_entry.data.get(CONF_SATELLITE_DEVICES, []),
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=satellite_options,
                         mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Required(
-                    CONF_BEDROOM_ECHO_DEVICE_ID,
-                    default=self.config_entry.data.get(CONF_BEDROOM_ECHO_DEVICE_ID, DEFAULT_BEDROOM_ECHO_DEVICE_ID),
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=satellite_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
                     )
                 ),
             }

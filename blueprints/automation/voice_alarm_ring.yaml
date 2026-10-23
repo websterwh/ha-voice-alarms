@@ -5,34 +5,24 @@ blueprint:
   input:
     voice_alarms_text:
       name: "Voice Alarms Text Helper"
-      description: "The input_text helper storing alarms (HH:MM<repeat><device>)"
+      description: "The input_text helper storing alarms (HH:MM<repeat><device_index>)"
       selector:
         entity:
           domain: input_text
-    voice_pe_ringing:
-      name: "Voice PE Ringing Flag"
-      description: "input_boolean for Voice PE alarm ringing state"
-      selector:
-        entity:
-          domain: input_boolean
-    bedroom_echo_ringing:
-      name: "Bedroom Echo Ringing Flag"
-      description: "input_boolean for Bedroom Echo alarm ringing state"
-      selector:
-        entity:
-          domain: input_boolean
-    voice_pe_satellite:
-      name: "Voice PE Satellite"
-      description: "The assist_satellite entity for Voice PE"
+    satellite_devices:
+      name: "Satellite Devices"
+      description: "List of assist_satellite entity IDs in priority order (matches config)"
       selector:
         entity:
           domain: assist_satellite
-    bedroom_echo_satellite:
-      name: "Bedroom Echo Satellite"
-      description: "The assist_satellite entity for Bedroom Echo"
+          multiple: true
+    satellite_ringing_flags:
+      name: "Satellite Ringing Flags"
+      description: "List of input_boolean entities for each satellite's ringing state (same order as satellites)"
       selector:
         entity:
-          domain: assist_satellite
+          domain: input_boolean
+          multiple: true
     max_ring_time:
       name: "Max Ring Time (minutes)"
       description: "Maximum time an alarm rings before auto-stop"
@@ -51,28 +41,19 @@ trigger:
 action:
   - variables:
       items: >
-        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') | list }}
+        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | list }}
       wd: "{{ now().weekday() }}"
       max_seconds: "{{ max_ring_time * 60 }}"
+      satellites: !input satellite_devices
+      ringing_flags: !input satellite_ringing_flags
 
   - variables:
-      due_voice: >
+      due_by_device: >
         {% set hhmm = now().strftime('%H:%M') %}
         {% set ns = namespace(d=[]) %}
         {% for i in items %}
-          {% if i[:5] == hhmm and i[6:7] == 'V' and
-              (i[5:6] in ['o','d'] or
-               (i[5:6] == 'w' and wd | int(0) < 5) or
-               (i[5:6] == 'e' and wd | int(0) >= 5)) %}
-            {% set ns.d = ns.d + [i] %}
-          {% endif %}
-        {% endfor %}
-        {{ ns.d }}
-      due_echo: >
-        {% set hhmm = now().strftime('%H:%M') %}
-        {% set ns = namespace(d=[]) %}
-        {% for i in items %}
-          {% if i[:5] == hhmm and i[6:7] == 'E' and
+          {% set dev_idx = i[6:] | int %}
+          {% if i[:5] == hhmm and dev_idx < satellites | length and
               (i[5:6] in ['o','d'] or
                (i[5:6] == 'w' and wd | int(0) < 5) or
                (i[5:6] == 'e' and wd | int(0) >= 5)) %}
@@ -83,7 +64,7 @@ action:
 
   - stop: "none due"
     if:
-      - "{{ due_voice | length == 0 and due_echo | length == 0 }}"
+      - "{{ due_by_device | length == 0 }}"
 
   - service: input_text.set_value
     target:
@@ -92,7 +73,7 @@ action:
       value: >
         {% set ns = namespace(k=[]) %}
         {% for i in items %}
-          {% if not ((i in due_voice or i in due_echo) and i[5:6] == 'o') %}
+          {% if not (i in due_by_device and i[5:6] == 'o') %}
             {% set ns.k = ns.k + [i] %}
           {% endif %}
         {% endfor %}
@@ -102,18 +83,19 @@ action:
       started: "{{ as_timestamp(now()) }}"
 
   - parallel:
+      {% for sat_idx in range(satellites | length) %}
       - sequence:
           - if:
-              - "{{ due_voice | length > 0 }}"
+              - "{{ due_by_device | select('match', '.*[0-9]' ~ sat_idx ~ '$') | list | length > 0 }}"
             then:
               - service: input_boolean.turn_on
                 target:
-                  entity_id: !input voice_pe_ringing
+                  entity_id: "{{ ringing_flags[sat_idx] }}"
               - repeat:
                   sequence:
                     - service: assist_satellite.announce
                       target:
-                        entity_id: !input voice_pe_satellite
+                        entity_id: "{{ satellites[sat_idx] }}"
                       data:
                         message: "Alarm. It is {{ now().strftime('%-I:%M %p') }}. Say stop alarm to turn it off."
                       continue_on_error: true
@@ -121,40 +103,14 @@ action:
                         seconds: 8
                   while:
                     - condition: state
-                      entity_id: !input voice_pe_ringing
+                      entity_id: "{{ ringing_flags[sat_idx] }}"
                       state: "on"
                     - condition: template
                       value_template: "{{ as_timestamp(now()) - (started | float(0)) < max_seconds }}"
               - service: input_boolean.turn_off
                 target:
-                  entity_id: !input voice_pe_ringing
-
-      - sequence:
-          - if:
-              - "{{ due_echo | length > 0 }}"
-            then:
-              - service: input_boolean.turn_on
-                target:
-                  entity_id: !input bedroom_echo_ringing
-              - repeat:
-                  sequence:
-                    - service: assist_satellite.announce
-                      target:
-                        entity_id: !input bedroom_echo_satellite
-                      data:
-                        message: "Alarm. It is {{ now().strftime('%-I:%M %p') }}. Say stop alarm to turn it off."
-                      continue_on_error: true
-                    - delay:
-                        seconds: 8
-                  while:
-                    - condition: state
-                      entity_id: !input bedroom_echo_ringing
-                      state: "on"
-                    - condition: template
-                      value_template: "{{ as_timestamp(now()) - (started | float(0)) < max_seconds }}"
-              - service: input_boolean.turn_off
-                target:
-                  entity_id: !input bedroom_echo_ringing
+                  entity_id: "{{ ringing_flags[sat_idx] }}"
+      {% endfor %}
 
 mode: parallel
 max_exceeded: silent

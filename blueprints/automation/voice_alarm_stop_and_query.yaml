@@ -5,7 +5,7 @@ blueprint:
   input:
     voice_alarms_text:
       name: "Voice Alarms Text Helper"
-      description: "The input_text helper storing alarms (HH:MM<repeat><device>)"
+      description: "The input_text helper storing alarms (HH:MM<repeat><device_index>)"
       selector:
         entity:
           domain: input_text
@@ -15,32 +15,20 @@ blueprint:
       selector:
         entity:
           domain: script
-    voice_pe_ringing:
-      name: "Voice PE Ringing Flag"
-      description: "input_boolean for Voice PE alarm ringing state"
+    satellite_devices:
+      name: "Satellite Devices"
+      description: "List of assist_satellite entity IDs in priority order (matches config)"
+      selector:
+        entity:
+          domain: assist_satellite
+          multiple: true
+    satellite_ringing_flags:
+      name: "Satellite Ringing Flags"
+      description: "List of input_boolean entities for each satellite's ringing state (same order as satellites)"
       selector:
         entity:
           domain: input_boolean
-    bedroom_echo_ringing:
-      name: "Bedroom Echo Ringing Flag"
-      description: "input_boolean for Bedroom Echo alarm ringing state"
-      selector:
-        entity:
-          domain: input_boolean
-    voice_pe_device_id:
-      name: "Voice PE Device ID"
-      description: "Device ID for Voice PE satellite"
-      selector:
-        text:
-    bedroom_echo_device_id:
-      name: "Bedroom Echo Device ID"
-      description: "Device ID for Bedroom Echo satellite"
-      selector:
-        text:
-
-variables:
-  voice_pe_device_id: !input voice_pe_device_id
-  bedroom_echo_device_id: !input bedroom_echo_device_id
+          multiple: true
 
 trigger:
   - platform: conversation
@@ -70,17 +58,18 @@ trigger:
 
 action:
   - variables:
-      device_code: >
+      device_index: >
+        {% set satellites = satellite_devices %}
         {% set did = trigger.device_id %}
-        {% if did == voice_pe_device_id %}V
-        {% elif did == bedroom_echo_device_id %}E
-        {% else %}{% endif %}
+        {% for i in range(satellites | length) %}
+          {% if satellites[i] == did %}{{ i }}{% endif %}
+        {% endfor %}
       items: >
-        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') | select('match','.*[VE]' ~ device_code ~ '$') | list }}
+        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | select('match','.*[0-9]' ~ device_index ~ '$') | list }}
 
   - stop: "Say that to a voice device."
     if:
-      - "{{ device_code == '' }}"
+      - "{{ device_index | string == '' }}"
 
   - choose:
       - conditions:
@@ -90,28 +79,12 @@ action:
           - choose:
               - conditions:
                   - condition: state
-                    entity_id: !input voice_pe_ringing
+                    entity_id: "{{ satellite_ringing_flags[device_index | int] }}"
                     state: "on"
-                  - condition: template
-                    value_template: "{{ device_code == 'V' }}"
                 sequence:
                   - service: input_boolean.turn_off
                     target:
-                      entity_id: !input voice_pe_ringing
-                  - response_variable: response
-                    service: conversation.set_conversation_response
-                    data:
-                      response: "Alarm off."
-              - conditions:
-                  - condition: state
-                    entity_id: !input bedroom_echo_ringing
-                    state: "on"
-                  - condition: template
-                    value_template: "{{ device_code == 'E' }}"
-                sequence:
-                  - service: input_boolean.turn_off
-                    target:
-                      entity_id: !input bedroom_echo_ringing
+                      entity_id: "{{ satellite_ringing_flags[device_index | int] }}"
                   - response_variable: response
                     service: conversation.set_conversation_response
                     data:
@@ -144,7 +117,7 @@ action:
                       entity_id: !input voice_alarms_text
                     data:
                       value: >
-                        {{ (states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') | reject('match','.*[VE]' ~ device_code ~ '$') | list) | join(',') }}
+                        {{ (states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | reject('match','.*[0-9]' ~ device_index ~ '$') | list) | join(',') }}
                   - response_variable: response
                     service: conversation.set_conversation_response
                     data:
@@ -170,8 +143,8 @@ action:
               kept: >
                 {% set ns = namespace(k=[]) %}
                 {% for i in states(voice_alarms_text).split(',') %}
-                  {% if i | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') %}
-                    {% if i[:5] not in (parsed.cands | default([])) or not i.endswith(device_code) %}
+                  {% if i | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') %}
+                    {% if i[:5] not in (parsed.cands | default([])) or not i.endswith(device_index | string) %}
                       {% set ns.k = ns.k + [i] %}
                     {% endif %}
                   {% else %}
@@ -181,7 +154,7 @@ action:
                 {{ ns.k }}
           - stop: "I couldn't find that alarm."
             if:
-              - "{{ kept | length == states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][VE]$') | list | length }}"
+              - "{{ kept | length == states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | list | length }}"
           - service: input_text.set_value
             target:
               entity_id: !input voice_alarms_text
@@ -201,7 +174,7 @@ action:
               entity_id: !input voice_alarms_text
             data:
               value: >
-                {{ (states(voice_alarms_text).split(',') | reject('match','.*[VE]' ~ device_code ~ '$') | list) | join(',') }}
+                {{ (states(voice_alarms_text).split(',') | reject('match','.*[0-9]' ~ device_index ~ '$') | list) | join(',') }}
           - response_variable: response
             service: conversation.set_conversation_response
             data:
