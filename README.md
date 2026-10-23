@@ -126,11 +126,9 @@ script:
     parameters:
       tone_id: int
     then:
-      - speaker.play:
-          id: speaker
-          media_url: "tone_{{ tone_id }}.wav"
-          volume: 0.8
-
+      - lambda: |-
+          std::string url = "tone_" + std::to_string(tone_id) + ".wav";
+          id(speaker).play(url.c_str(), 0.8);
 interval:
   - interval: 60s
     then:
