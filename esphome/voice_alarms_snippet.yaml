@@ -1,3 +1,10 @@
+# Voice Alarms ESPHome snippet for Home Assistant Voice PE
+# Paste after the `packages:` line; place voice_alarms.h next to this YAML
+
+esphome:
+  includes:
+    - voice_alarms.h
+
 time:
   - platform: sntp
     id: va_clock
@@ -10,21 +17,13 @@ globals:
     type: "std::vector<VaAlarm>"
     restore_value: false
 
-audio_dac:
-  - platform: i2s
-    id: va_dac
-
-speaker:
-  - platform: i2s_audio
-    id: va_speaker
-    dac: va_dac
-
 script:
   - id: va_play_tone
     parameters:
       tone_id: int
     then:
       - speaker.play:
+          id: speaker
           media_url: "tone_{{ tone_id }}.wav"
           volume: 0.8
 
@@ -55,10 +54,10 @@ voice_assistant:
   on_alarm_set:
     - lambda: |
         VaAlarm a;
-        a.hour = /* hour slot */;
-        a.minute = /* minute slot */;
-        a.repeat_mask = /* compute from repeat slot */;
-        a.tone = /* tone slot */;
+        a.hour         = /* hour slot from intent */;
+        a.minute       = /* minute slot */;
+        a.repeat_mask  = /* compute from repeat slot (once|daily|weekdays|weekends) */;
+        a.tone         = /* tone slot (0,1,2…) */;
         id(va_alarms).push_back(a);
 
 binary_sensor:
