@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Voice Alarms Setup",
+        "description": "Configure voice alarms for your Assist satellites.",
+        "data": {
+          "max_ring_time": "Maximum ring time (minutes)",
+          "satellite_devices": "Satellite devices",
+          "local_satellites": "Local satellites (can ring without HA)",
+          "alarm_mode": "Alarm mode",
+          "sound": "Alarm sound"
+        },
+        "data_description": {
+          "max_ring_time": "How long the alarm rings before stopping automatically (1-120 minutes).",
+          "satellite_devices": "All assist_satellite entities that can receive alarms.",
+          "local_satellites": "Subset of satellite devices that support on-device ringing. Must be a subset of the selected satellite devices.",
+          "alarm_mode": "Choose HA announcements or device-side ringing on selected local satellites.",
+          "sound": "The sound played when an alarm fires. Options are discovered from the voice_alarms_sound select entity on each satellite device."
+        }
+      }
+    },
+    "error": {
+      "satellites_required": "At least one satellite device must be selected.",
+      "local_not_subset": "Local satellites must be a subset of the selected satellite devices.",
+      "sound_not_available": "The selected sound is not available on one or more local satellites."
+    },
+    "abort": {
+      "already_configured": "Voice Alarms is already configured. Use the options flow to change settings."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Voice Alarms Options",
+        "description": "Update Voice Alarms configuration.",
+        "data": {
+          "max_ring_time": "Maximum ring time (minutes)",
+          "satellite_devices": "Satellite devices",
+          "local_satellites": "Local satellites (can ring without HA)",
+          "alarm_mode": "Alarm mode",
+          "sound": "Alarm sound"
+        },
+        "data_description": {
+          "max_ring_time": "How long the alarm rings before stopping automatically (1-120 minutes).",
+          "satellite_devices": "All assist_satellite entities that can receive alarms.",
+          "local_satellites": "Subset of satellite devices that support on-device ringing. Must be a subset of the selected satellite devices.",
+          "alarm_mode": "Choose HA announcements or device-side ringing on selected local satellites.",
+          "sound": "The sound played when an alarm fires. Options are discovered from the voice_alarms_sound select entity on each satellite device."
+        }
+      }
+    },
+    "error": {
+      "satellites_required": "At least one satellite device must be selected.",
+      "local_not_subset": "Local satellites must be a subset of the selected satellite devices.",
+      "sound_not_available": "The selected sound is not available on one or more local satellites."
+    }
+  }
+}

@@ -1,0 +1,21 @@
+substitutions:
+  name: voice-alarms-validation
+  friendly_name: Voice Alarms Validation
+
+packages:
+  voice_pe: github://esphome/home-assistant-voice-pe/home-assistant-voice.yaml@d4e6fa43d6a1a7d342b7d4d403567e06516719de
+  voice_alarms: !include ../esphome/voice_alarms_snippet.yaml
+
+wifi:
+  ssid: validation-network
+  password: validation-password
+
+api:
+  encryption:
+    key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
+audio_file:
+  - id: !extend va_alarm_chime
+    file: ../esphome/sounds/alarm_chime.wav
+  - id: !extend va_alarm_bell
+    file: ../esphome/sounds/alarm_bell.wav

@@ -1,0 +1,38 @@
+command:
+  name: Voice alarm command
+  description: Set, stop, cancel, or list alarms on a configured satellite. Returns a spoken response.
+  fields:
+    satellite:
+      required: true
+      selector:
+        entity:
+          domain: assist_satellite
+    operation:
+      required: true
+      selector:
+        select:
+          options: [set, stop, cancel, cancel_all, list]
+    time:
+      selector:
+        text:
+    repeat:
+      selector:
+        select:
+          options: [once, daily, weekdays, weekends]
+sync:
+  name: Sync local alarms
+  description: Send the current schedule and shared sound to one or all configured local satellites.
+  fields:
+    satellite:
+      selector:
+        entity:
+          domain: assist_satellite
+test_alarm:
+  name: Test alarm
+  description: Ring one satellite using the configured mode until stopped or the ring limit is reached.
+  fields:
+    satellite:
+      required: true
+      selector:
+        entity:
+          domain: assist_satellite

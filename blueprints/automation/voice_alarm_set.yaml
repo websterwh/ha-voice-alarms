@@ -1,105 +1,122 @@
 blueprint:
   name: "Voice Alarm: Set"
-  description: "Set an alarm by voice, optionally repeating (daily, weekdays, weekends). Per-device isolation."
+  description: >
+    Set a one-time, daily, weekday, or weekend alarm by voice on any configured
+    satellite. Each repeat type has its own trigger with explicit phrases so no
+    wildcard slot can swallow the time value. All storage and scheduling are
+    delegated to the Voice Alarms integration (voice_alarms.command).
   domain: automation
+  source_url: https://github.com/websterwh/ha-voice-alarms/blob/master/blueprints/automation/voice_alarm_set.yaml
+  homeassistant:
+    min_version: "2026.10.0"
   input:
-    voice_alarms_text:
-      name: "Voice Alarms Text Helper"
-      description: "The input_text helper storing alarms (HH:MM<repeat><device_index>)"
-      selector:
-        entity:
-          domain: input_text
-    parse_alarm_time_script:
-      name: "Parse Alarm Time Script"
-      description: "Script that parses voice time input"
-      selector:
-        entity:
-          domain: script
     satellite_devices:
-      name: "Satellite Devices"
-      description: "List of assist_satellite entity IDs in priority order"
+      name: Satellite Devices
+      description: >
+        All assist_satellite entities this automation should handle. Only the
+        satellite whose device_id matches trigger.device_id will be addressed.
       selector:
         entity:
           domain: assist_satellite
           multiple: true
-    max_ring_time:
-      name: "Max Ring Time (minutes)"
-      description: "Maximum time an alarm rings before auto-stop"
-      default: 30
-      selector:
-        number:
-          min: 1
-          max: 120
-          step: 1
-          mode: box
+
+variables:
+  satellites: !input satellite_devices
 
 trigger:
   - platform: conversation
+    id: once
     command:
-      - "set [a|an|my] [daily|weekday|weekdays|weekend|weekends|recurring|repeating] alarm (for|at) {time}"
-      - "set [a|an|my] [daily|weekday|weekdays|weekend|weekends|recurring|repeating] alarm {time}"
-      - "wake me up at {time}"
+      - "set [a|an|my] alarm (for|at) {time}"
+      - "set [a|an|my] alarm {time}"
+      - "wake me up (at|by) {time}"
       - "alarm (for|at) {time}"
 
+  - platform: conversation
+    id: daily
+    command:
+      - "set [a|an|my] daily alarm (for|at) {time}"
+      - "set [a|an|my] daily alarm {time}"
+      - "set [a|an|my] (every day|everyday) alarm (for|at) {time}"
+      - "set [a|an|my] (every day|everyday) alarm {time}"
+      - "set [a|an|my] (recurring|repeating) alarm (for|at) {time}"
+      - "set [a|an|my] (recurring|repeating) alarm {time}"
+
+  - platform: conversation
+    id: weekdays
+    command:
+      - "set [a|an|my] weekday alarm (for|at) {time}"
+      - "set [a|an|my] weekday alarm {time}"
+      - "set [a|an|my] weekdays alarm (for|at) {time}"
+      - "set [a|an|my] weekdays alarm {time}"
+
+  - platform: conversation
+    id: weekends
+    command:
+      - "set [a|an|my] weekend alarm (for|at) {time}"
+      - "set [a|an|my] weekend alarm {time}"
+      - "set [a|an|my] weekends alarm (for|at) {time}"
+      - "set [a|an|my] weekends alarm {time}"
+
 action:
-  - service: script.turn_on
-    target:
-      entity_id: !input parse_alarm_time_script
-    data:
-      variables:
-        text: "{{ trigger.slots.time }}"
-    response_variable: parsed
-
-  - stop: "I didn't catch the time."
-    if:
-      - "{{ parsed.hhmm | default('') == '' }}"
-
+  # Resolve which satellite spoke. Reject absent (0 matches) and ambiguous
+  # (2+ matches, i.e. multiple entities share the same device).
   - variables:
-      repeat_code: >
-        {% set t = trigger.sentence | lower %}
-        {% if 'weekday' in t %}w
-        {% elif 'weekend' in t %}e
-        {% elif 'daily' in t or 'every day' in t or 'everyday' in t or 'recurring' in t or 'repeating' in t %}d
-        {% else %}o{% endif %}
-      device_index: >
-        {% set satellites = satellite_devices %}
-        {% set did = trigger.device_id %}
-        {% for i in range(satellites | length) %}
-          {% if satellites[i] == did %}{{ i }}{% endif %}
+      satellite_entity: >
+        {% set ns = namespace(found='', count=0) %}
+        {% for sat in satellites %}
+          {% if trigger.device_id is not none and device_id(sat) == trigger.device_id %}
+            {% set ns.found = sat %}
+            {% set ns.count = ns.count + 1 %}
+          {% endif %}
         {% endfor %}
-      items: >
-        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | list }}
+        {% if ns.count == 1 %}{{ ns.found }}{% endif %}
 
+  - if:
+      - condition: template
+        value_template: "{{ satellite_entity == '' }}"
+    then:
+      - set_conversation_response: "Sorry, I couldn't identify which satellite you're speaking from."
+      - stop: "Satellite absent or ambiguous."
+
+  # Map trigger id → repeat value passed to the integration.
   - variables:
-      entry: "{{ parsed.hhmm ~ repeat_code ~ device_index }}"
-      label: >
-        {{ today_at(parsed.hhmm).strftime('%-I:%M %p') }}
-        {{
-          {'o':'','d':' every day','w':' on weekdays','e':' on weekends'}[repeat_code]
-        }}
+      repeat_value: once
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: once
+        sequence:
+          - variables:
+              repeat_value: once
+      - conditions:
+          - condition: trigger
+            id: daily
+        sequence:
+          - variables:
+              repeat_value: daily
+      - conditions:
+          - condition: trigger
+            id: weekdays
+        sequence:
+          - variables:
+              repeat_value: weekdays
+      - conditions:
+          - condition: trigger
+            id: weekends
+        sequence:
+          - variables:
+              repeat_value: weekends
 
-  - stop: "Say that to a voice device."
-    if:
-      - "{{ device_index | string == '' }}"
-
-  - stop: "That alarm is already set."
-    if:
-      - "{{ entry in items }}"
-
-  - stop: "You have too many alarms."
-    if:
-      - "{{ items | length >= 30 }}"
-
-  - service: input_text.set_value
-    target:
-      entity_id: !input voice_alarms_text
+  - action: voice_alarms.command
     data:
-      value: "{{ (items + [entry]) | join(',') }}"
+      satellite: "{{ satellite_entity }}"
+      operation: set
+      time: "{{ trigger.slots.time }}"
+      repeat: "{{ repeat_value }}"
+    response_variable: result
 
-  - response_variable: response
-    service: conversation.set_conversation_response
-    data:
-      response: "Alarm set for {{ label }}."
+  - set_conversation_response: "{{ result.response }}"
 
 mode: queued
-max_exceeded: silent
+max: 30

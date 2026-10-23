@@ -1,23 +1,4 @@
 {
   "name": "Voice Alarms",
-  "description": "Per-device voice alarms for Home Assistant Assist with Wyoming faster-whisper, Kokoro TTS, and built-in conversation agent. Each alarm belongs to the satellite it was set on.",
-  "version": "1.0.0",
-  "category": "integration",
-  "author": "websterwh",
-  "repository": "https://github.com/websterwh/ha-voice-alarms",
-  "homepage": "https://github.com/websterwh/ha-voice-alarms",
-  "documentation": "https://github.com/websterwh/ha-voice-alarms/blob/main/README.md",
-  "license": "MIT",
-  "requirements": [],
-  "dependencies": [],
-  "compatible_versions": [
-    "2026.10",
-    "2026.11",
-    "2027.1",
-    "2027.2"
-  ],
-  "main_branch": "main",
-  "hide": false,
-  "ignore": false,
-  "updated_at": "2026-10-22T00:00:00Z"
+  "homeassistant": "2026.10.0"
 }

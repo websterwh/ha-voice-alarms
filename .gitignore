@@ -1,0 +1,7 @@
+.gjc/
+.serena/
+.esphome/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc

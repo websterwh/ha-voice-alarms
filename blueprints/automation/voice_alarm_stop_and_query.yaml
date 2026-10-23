@@ -1,200 +1,143 @@
 blueprint:
-  name: "Voice Alarm: Stop, Cancel, List"
-  description: "Stop a ringing alarm on this device; cancel one/all alarms for this device; list alarms for this device."
+  name: "Voice Alarm: Stop, Cancel & List"
+  description: >
+    Stop a ringing alarm, cancel one or all alarms for this device, or list
+    current alarms. All state changes are delegated to the Voice Alarms
+    integration (voice_alarms.command). No input_text or ringing flag helpers
+    required.
   domain: automation
+  source_url: https://github.com/websterwh/ha-voice-alarms/blob/master/blueprints/automation/voice_alarm_stop_and_query.yaml
+  homeassistant:
+    min_version: "2026.10.0"
   input:
-    voice_alarms_text:
-      name: "Voice Alarms Text Helper"
-      description: "The input_text helper storing alarms (HH:MM<repeat><device_index>)"
-      selector:
-        entity:
-          domain: input_text
-    parse_alarm_time_script:
-      name: "Parse Alarm Time Script"
-      description: "Script that parses voice time input"
-      selector:
-        entity:
-          domain: script
     satellite_devices:
-      name: "Satellite Devices"
-      description: "List of assist_satellite entity IDs in priority order (matches config)"
+      name: Satellite Devices
+      description: >
+        All assist_satellite entities this automation should handle. Only the
+        satellite whose device_id matches trigger.device_id will be addressed.
       selector:
         entity:
           domain: assist_satellite
           multiple: true
-    satellite_ringing_flags:
-      name: "Satellite Ringing Flags"
-      description: "List of input_boolean entities for each satellite's ringing state (same order as satellites)"
-      selector:
-        entity:
-          domain: input_boolean
-          multiple: true
+
+variables:
+  satellites: !input satellite_devices
 
 trigger:
+  # Stop a currently ringing alarm on this device.
   - platform: conversation
     id: stop
     command:
-      - "(stop|dismiss|silence|turn off|shut off) [the|my] alarm"
+      - "(stop|dismiss|silence|turn off|shut off) [the|my] alarm[s]"
+      - "(stop|dismiss|silence|turn off|shut off) alarm"
+
+  # Cancel an alarm without specifying time. Integration cancels the sole
+  # alarm or asks the user to specify a time.
   - platform: conversation
     id: cancel_one
     command:
       - "(cancel|delete|remove|clear) [the|my] alarm"
+      - "(cancel|delete|remove|clear) [an|my] alarm"
+
+  # Cancel the alarm at a specific time.
   - platform: conversation
     id: cancel_time
     command:
       - "(cancel|delete|remove|clear) [the|my] {time} alarm"
       - "(cancel|delete|remove|clear) [the|my] alarm (for|at) {time}"
+
+  # Cancel every alarm on this device.
   - platform: conversation
     id: cancel_all
     command:
       - "(cancel|delete|remove|clear) (all|every) [of] [my|the] alarms"
+      - "(cancel|delete|remove|clear) all [my] alarms"
+
+  # List alarms set on this device.
   - platform: conversation
     id: list
     command:
-      - "what alarms (do I have|are set)"
-      - "list [my|the] alarms"
-      - "what time is [the|my] alarm [set for]"
-      - "when is [the|my] alarm"
+      - "list [my] alarms"
+      - "what alarms [do I have|are set]"
+      - "which alarms [do I have|are set]"
+      - "[do I have|are there] any alarms"
 
 action:
+  # Resolve which satellite spoke. Reject absent (0 matches) and ambiguous
+  # (2+ matches, i.e. multiple entities share the same device).
   - variables:
-      device_index: >
-        {% set satellites = satellite_devices %}
-        {% set did = trigger.device_id %}
-        {% for i in range(satellites | length) %}
-          {% if satellites[i] == did %}{{ i }}{% endif %}
+      satellite_entity: >
+        {% set ns = namespace(found='', count=0) %}
+        {% for sat in satellites %}
+          {% if trigger.device_id is not none and device_id(sat) == trigger.device_id %}
+            {% set ns.found = sat %}
+            {% set ns.count = ns.count + 1 %}
+          {% endif %}
         {% endfor %}
-      items: >
-        {{ states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | select('match','.*[0-9]' ~ device_index ~ '$') | list }}
+        {% if ns.count == 1 %}{{ ns.found }}{% endif %}
 
-  - stop: "Say that to a voice device."
-    if:
-      - "{{ device_index | string == '' }}"
+  - if:
+      - condition: template
+        value_template: "{{ satellite_entity == '' }}"
+    then:
+      - set_conversation_response: "Sorry, I couldn't identify which satellite you're speaking from."
+      - stop: "Satellite absent or ambiguous."
 
+  # Map trigger id → operation + optional time.
+  # cancel_one sends time='' so the integration can decide whether to cancel
+  # the sole alarm or ask the user to be more specific.
+  - variables:
+      operation_value: list
+      time_value: ""
   - choose:
       - conditions:
           - condition: trigger
             id: stop
         sequence:
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: "{{ satellite_ringing_flags[device_index | int] }}"
-                    state: "on"
-                sequence:
-                  - service: input_boolean.turn_off
-                    target:
-                      entity_id: "{{ satellite_ringing_flags[device_index | int] }}"
-                  - response_variable: response
-                    service: conversation.set_conversation_response
-                    data:
-                      response: "Alarm off."
-              - default:
-                  - response_variable: response
-                    service: conversation.set_conversation_response
-                    data:
-                      response: "No alarm is ringing."
+          - variables:
+              operation_value: stop
+              time_value: ""
 
       - conditions:
           - condition: trigger
             id: cancel_one
         sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ items | length == 0 }}"
-                sequence:
-                  - response_variable: response
-                    service: conversation.set_conversation_response
-                    data:
-                      response: "No alarms are set."
-              - conditions:
-                  - condition: template
-                    value_template: "{{ items | length == 1 }}"
-                sequence:
-                  - service: input_text.set_value
-                    target:
-                      entity_id: !input voice_alarms_text
-                    data:
-                      value: >
-                        {{ (states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | reject('match','.*[0-9]' ~ device_index ~ '$') | list) | join(',') }}
-                  - response_variable: response
-                    service: conversation.set_conversation_response
-                    data:
-                      response: "Alarm cancelled."
-              - default:
-                  - response_variable: response
-                    service: conversation.set_conversation_response
-                    data:
-                      response: "You have {{ items | length }} alarms. Say cancel the 7 AM alarm, or cancel all alarms."
+          - variables:
+              operation_value: cancel
+              time_value: ""
 
       - conditions:
           - condition: trigger
             id: cancel_time
         sequence:
-          - service: script.turn_on
-            target:
-              entity_id: !input parse_alarm_time_script
-            data:
-              variables:
-                text: "{{ trigger.slots.time }}"
-            response_variable: parsed
           - variables:
-              kept: >
-                {% set ns = namespace(k=[]) %}
-                {% for i in states(voice_alarms_text).split(',') %}
-                  {% if i | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') %}
-                    {% if i[:5] not in (parsed.cands | default([])) or not i.endswith(device_index | string) %}
-                      {% set ns.k = ns.k + [i] %}
-                    {% endif %}
-                  {% else %}
-                    {% set ns.k = ns.k + [i] %}
-                  {% endif %}
-                {% endfor %}
-                {{ ns.k }}
-          - stop: "I couldn't find that alarm."
-            if:
-              - "{{ kept | length == states(voice_alarms_text).split(',') | select('match','[0-9][0-9]:[0-9][0-9][odwe][0-9]+$') | list | length }}"
-          - service: input_text.set_value
-            target:
-              entity_id: !input voice_alarms_text
-            data:
-              value: "{{ kept | join(',') }}"
-          - response_variable: response
-            service: conversation.set_conversation_response
-            data:
-              response: "Alarm cancelled."
+              operation_value: cancel
+              time_value: "{{ trigger.slots.time }}"
 
       - conditions:
           - condition: trigger
             id: cancel_all
         sequence:
-          - service: input_text.set_value
-            target:
-              entity_id: !input voice_alarms_text
-            data:
-              value: >
-                {{ (states(voice_alarms_text).split(',') | reject('match','.*[0-9]' ~ device_index ~ '$') | list) | join(',') }}
-          - response_variable: response
-            service: conversation.set_conversation_response
-            data:
-              response: "All alarms cancelled."
+          - variables:
+              operation_value: cancel_all
+              time_value: ""
 
       - conditions:
           - condition: trigger
             id: list
         sequence:
-          - response_variable: response
-            service: conversation.set_conversation_response
-            data:
-              response: >
-                {% if items | length == 0 %}No alarms are set.
-                {% else %}You have {{ items | length }} alarm{{ 's' if items | length > 1 }}:
-                  {% for i in items %}
-                    {{ today_at(i[:5]).strftime('%-I:%M %p') }}
-                    {{ {'o':'','d':' every day','w':' on weekdays','e':' on weekends'}[i[5:6]] }}
-                    {{ ', ' if not loop.last }}
-                  {% endfor %}.{% endif %}
+          - variables:
+              operation_value: list
+              time_value: ""
+
+  - action: voice_alarms.command
+    data:
+      satellite: "{{ satellite_entity }}"
+      operation: "{{ operation_value }}"
+      time: "{{ time_value }}"
+    response_variable: result
+
+  - set_conversation_response: "{{ result.response }}"
 
 mode: queued
-max_exceeded: silent
+max: 30
