@@ -14,6 +14,7 @@ from .const import (
     CONF_SATELLITE_DEVICES,
     CONF_ALARM_MODE,
     CONF_TONE_BASE_URL,
+    CONF_LOCAL_SATELLITES,
     DEFAULT_MAX_RING_TIME,
     DEFAULT_ALARM_MODE,
     DEFAULT_TONE_BASE_URL,
@@ -76,6 +77,14 @@ class VoiceAlarmsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.TextSelector(
                     selector.TextSelectorConfig(
                         type=selector.TextSelectorType.URL,
+                    )
+                ),
+                # When alarm_mode is local_preferred, let user pick which satellites support local alarms
+                vol.Optional(CONF_LOCAL_SATELLITES, default=[]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=satellite_options,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
                     )
                 ),
             }
@@ -152,6 +161,16 @@ class VoiceAlarmsOptionsFlow(config_entries.OptionsFlow):
                 ): selector.TextSelector(
                     selector.TextSelectorConfig(
                         type=selector.TextSelectorType.URL,
+                    )
+                ),
+                vol.Optional(
+                    CONF_LOCAL_SATELLITES,
+                    default=self.config_entry.data.get(CONF_LOCAL_SATELLITES, []),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=satellite_options,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        multiple=True,
                     )
                 ),
             }

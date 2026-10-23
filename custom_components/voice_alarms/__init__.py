@@ -17,6 +17,7 @@ from .const import (
     CONF_SATELLITE_DEVICES,
     CONF_ALARM_MODE,
     CONF_TONE_BASE_URL,
+    CONF_LOCAL_SATELLITES,
     ALARM_MODE_HA_FALLBACK,
     ALARM_MODE_LOCAL_PREFERRED,
 )
@@ -80,6 +81,7 @@ async def _sync_alarms(hass: HomeAssistant, entry: ConfigEntry, target_satellite
     satellites = data.get(CONF_SATELLITE_DEVICES, [])
     alarm_mode = data.get(CONF_ALARM_MODE, ALARM_MODE_HA_FALLBACK)
     tone_base_url = data.get(CONF_TONE_BASE_URL, "")
+    local_satellites = set(data.get(CONF_LOCAL_SATELLITES, []))
 
     # Get the alarm list from the input_text helper (created by blueprints)
     # The helper entity_id is fixed by the blueprints: input_text.voice_alarms
@@ -106,10 +108,10 @@ async def _sync_alarms(hass: HomeAssistant, entry: ConfigEntry, target_satellite
             _LOGGER.warning("Satellite %s has no device_id", sat_entity)
             continue
 
-        # Check if local mode is preferred and device supports it
+        # Check if local mode is preferred and this satellite is marked as local-capable
         use_local = (
             alarm_mode == ALARM_MODE_LOCAL_PREFERRED
-            and _device_supports_local(hass, device_id)
+            and sat_entity in local_satellites
         )
 
         if use_local:
@@ -141,24 +143,6 @@ async def _test_alarm(hass: HomeAssistant, entry: ConfigEntry, satellite_entity:
 
     # Send a one-shot test tone via ESPHome
     await _push_test_tone(hass, device_id, tone, tone_base_url)
-
-
-def _device_supports_local(hass: HomeAssistant, device_id: str) -> bool:
-    """Check if the device has the local alarm binary sensor set to true."""
-    # The binary sensor entity_id is predictable: binary_sensor.voice_alarms_local_supported
-    # but it's per device. We'll look for any binary_sensor with that name belonging to the device.
-    # Simpler: check device registry for entities.
-    dev_reg = hass.helpers.device_registry.async_get(hass)
-    device = dev_reg.async_get(device_id)
-    if not device:
-        return False
-    ent_reg = hass.helpers.entity_registry.async_get(hass)
-    for ent_id in ent_reg.entities.entities:
-        ent = ent_reg.entities[ent_id]
-        if ent.device_id == device_id and ent_id.startswith("binary_sensor.") and "voice_alarms_local_supported" in ent_id:
-            state = hass.states.get(ent_id)
-            return state is not None and state.state == "on"
-    return False
 
 
 async def _push_to_esphome(hass: HomeAssistant, device_id: str, alarm_list: str, tone_base_url: str) -> None:

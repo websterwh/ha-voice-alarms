@@ -6,6 +6,7 @@ CONF_MAX_RING_TIME = "max_ring_time"
 CONF_SATELLITE_DEVICES = "satellite_devices"
 CONF_ALARM_MODE = "alarm_mode"
 CONF_TONE_BASE_URL = "tone_base_url"
+CONF_LOCAL_SATELLITES = "local_satellites"
 
 DEFAULT_MAX_RING_TIME = 30  # minutes
 DEFAULT_ALARM_MODE = "ha_fallback"  # or "local_preferred"
