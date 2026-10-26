@@ -21,6 +21,25 @@ def tagged(loader, tag, node):
 FirmwareLoader.add_multi_constructor("!", tagged)
 
 
+def test_alarm_led_feedback_tracks_ringing():
+    config = yaml.load(
+        Path("esphome/voice_alarms_snippet.yaml").read_text(), Loader=FirmwareLoader
+    )
+    ringing = next(s for s in config["switch"] if s["id"] == "va_alarm_ringing")
+    for transition in ("on_turn_on", "on_turn_off"):
+        assert ringing[transition][-1] == {"script.execute": "control_leds"}
+
+    leds = next(s for s in config["script"] if s["id"] == "control_leds")
+    assert leds["then"] == [
+        {
+            "if": {
+                "condition": {"switch.is_on": "va_alarm_ringing"},
+                "then": [{"script.execute": "control_leds_timer_ringing"}],
+            }
+        }
+    ]
+
+
 def test_actual_firmware_sync_and_scheduler(tmp_path):
     include = os.environ.get("ARDUINOJSON_INCLUDE")
     assert include and (Path(include) / "ArduinoJson.h").is_file(), (

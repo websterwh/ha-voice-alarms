@@ -76,6 +76,7 @@ switch:
           duration: 0s
       - script.execute: va_ring_alarm
       - script.execute: va_ring_timeout
+      - script.execute: control_leds
     on_turn_off:
       - script.stop: va_ring_alarm
       - script.stop: va_ring_timeout
@@ -91,6 +92,7 @@ switch:
                 decibel_reduction: 0
                 duration: 1s
             - micro_wake_word.disable_model: stop
+      - script.execute: control_leds
 
 binary_sensor:
   - platform: template
@@ -115,6 +117,15 @@ button:
       - switch.turn_on: va_alarm_ringing
 
 script:
+  # Reapply the native timer animation after upstream LED arbitration, including
+  # playback and connection changes. Turning off restores the upstream state.
+  - id: !extend control_leds
+    then:
+      - if:
+          condition:
+            switch.is_on: va_alarm_ringing
+          then:
+            - script.execute: control_leds_timer_ringing
   - id: va_ring_alarm
     mode: restart
     then:

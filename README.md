@@ -65,6 +65,8 @@ The package registers WAVs with `audio_file` and plays them through Voice PE's e
 
 Compile and flash, reconnect the device in HA, then configure Local Preferred and select it. Use Developer tools → Actions → **Voice Alarms: Test alarm**, passing the satellite entity. Stop with “stop alarm”, the physical center button, or the local stop wake word. Stock Voice PE timers remain separate.
 
+While a local alarm rings, the LED ring uses Voice PE's native timer-ringing animation. Stopping the alarm restores the normal LED state. A detected wake word (including the usual assistant wake word) dismisses the local alarm without opening a listening session; no listening light is expected. This LED behavior requires rebuilding and flashing the updated package.
+
 ### Offline boundaries
 
 Device schedules and per-alarm firing markers are persisted in flash. Once a clock has synchronized, schedules can ring while HA is offline. This does **not** provide a battery-backed RTC: after a cold boot, SNTP must obtain time before alarms can run. The default public SNTP server needs network access for synchronization; a reachable LAN NTP server can replace it. Voice setting/cancelling/listing still needs HA. Power loss before flash persistence completes can lose a recent update; don't rely on this as a safety-critical alarm clock.
