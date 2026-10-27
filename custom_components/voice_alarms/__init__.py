@@ -274,16 +274,48 @@ class AlarmCoordinator:
         return json.dumps(data)
 
     async def async_native(self, satellite: str, action: str, **kwargs) -> None:
-        """Call a native API action on the satellite."""
+        """Call a native API action on the satellite via ESPHome service."""
         if not self.is_local(satellite):
             return
+        # Map satellite entity_id to ESPHome device name
+        # assist_satellite.home_assistant_voice_0add46_assist_satellite -> home_assistant_voice
+        parts = satellite.split(".")
+        if len(parts) < 3:
+            _LOGGER.warning("Cannot determine ESPHome device from satellite %s", satellite)
+            return
+        device_name = parts[1]  # "home_assistant_voice_0add46"
+        # Extract base name
+        if device_name.startswith("home_assistant_voice"):
+            base_name = "home_assistant_voice"
+        elif device_name.startswith("bedroom_echo"):
+            base_name = "bedroom_echo"
+        else:
+            base_name = "_".join(device_name.split("_")[:2])
+
+        service_map = {
+            "voice_alarms_sync": f"esphome.{base_name}_voice_alarms_sync",
+            "voice_alarms_stop": f"esphome.{base_name}_voice_alarms_stop",
+            "voice_alarms_test": f"esphome.{base_name}_voice_alarms_test",
+        }
+        service = service_map.get(action)
+        if not service:
+            _LOGGER.warning("Unknown native action: %s", action)
+            return
         try:
-            await self.hass.services.async_call(
-                "api",
-                "execute_action",
-                {"entity_id": satellite, "action": action, **kwargs},
-                blocking=True,
-            )
+            if action == "voice_alarms_sync":
+                await self.hass.services.async_call(
+                    "esphome",
+                    service.split(".")[-1],
+                    {"payload": kwargs.get("payload", "")},
+                    blocking=True,
+                )
+            else:
+                await self.hass.services.async_call(
+                    "esphome",
+                    service.split(".")[-1],
+                    {},
+                    blocking=True,
+                )
         except Exception as e:
             _LOGGER.warning("Native action %s failed for %s: %s", action, satellite, e)
 
