@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from . import AlarmCoordinator
 from .const import DOMAIN
@@ -84,7 +85,7 @@ class VoiceAlarmsSensor(SensorEntity):
         }
 
     def _alarms_for_satellite(self):
-        now = self._hass.helpers.utcnow()
+        now = dt_util.utcnow()
         return [
             a
             for a in self._coordinator.alarms

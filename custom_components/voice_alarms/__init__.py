@@ -60,8 +60,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = AlarmCoordinator(hass, entry)
     await coordinator.async_load()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
     # Forward to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
+
+    async def command(call: ServiceCall) -> dict:
+        return await coordinator.async_command(dict(call.data))
+
     async def sync(call: ServiceCall) -> None:
         async with coordinator.lock:
             await coordinator.async_sync(call.data.get("satellite"), force=True)
