@@ -563,6 +563,17 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
                 h, m, ap = m.groups()
                 m = m or "00"
                 return f"{h}:{m} {ap.upper()}"
+            # Pattern 3: STT run-together like "103 AM" -> treat as 1:03 AM or 10:03 AM
+            m = re.search(r'(\d{3,4})\s*(am|pm)', text, re.IGNORECASE)
+            if m:
+                digits, ap = m.groups()
+                if len(digits) == 3:
+                    # "103" -> 1:03 (prefer 1-digit hour)
+                    h, m = digits[0], digits[1:]
+                else:
+                    # "1255" -> 12:55
+                    h, m = digits[:2], digits[2:]
+                return f"{h}:{m} {ap.upper()}"
             return ""
 
         # Try slot time first
