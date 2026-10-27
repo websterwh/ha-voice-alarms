@@ -23,6 +23,9 @@ globals:
   - id: va_sync_error
     type: std::string
     initial_value: '"Invalid alarm payload"'
+  - id: va_alarm_dismissed
+    type: bool
+    initial_value: 'false'
 
 time:
   - platform: sntp
@@ -122,22 +125,50 @@ script:
   # Alarm LED animation - runs native timer-ringing effect WITHOUT the final
   # control_leds call that would reset LEDs based on timer_ringing state.
   - id: va_alarm_led_ringing
+    mode: restart
     then:
-      - light.turn_on:
-          brightness: !lambda |-
-            if (id(voice_kit_component).is_failed()) return 0;
-            return 66;
-          red: 100%
-          green: 40%
-          blue: 0%
-          id: voice_assistant_leds
-          effect: "Rainbow"
-      - delay: 1s
-      - lambda: !lambda |-
-          id(dial_touched) = false;
+      - while:
+          condition:
+            switch.is_on: va_alarm_ringing
+          then:
+            - light.turn_on:
+                brightness: !lambda |-
+                  if (id(voice_kit_component).is_failed()) return 0;
+                  return 66;
+                red: 100%
+                green: 40%
+                blue: 0%
+                id: voice_assistant_leds
+                effect: "Rainbow"
+            - delay: 2s
   - id: va_alarm_led_off
     then:
+      - if:
+          condition:
+            lambda: return id(va_alarm_dismissed);
+          then:
+            - script.execute: va_alarm_led_dismissed
       - script.execute: control_leds
+  - id: va_alarm_led_dismissed
+    then:
+      # Quick green flash to confirm alarm was dismissed
+      - light.turn_on:
+          brightness: 80
+          red: 0%
+          green: 100%
+          blue: 0%
+          id: voice_assistant_leds
+      - delay: 200ms
+      - light.turn_off: voice_assistant_leds
+      - delay: 100ms
+      - light.turn_on:
+          brightness: 80
+          red: 0%
+          green: 100%
+          blue: 0%
+          id: voice_assistant_leds
+      - delay: 200ms
+      - light.turn_off: voice_assistant_leds
   - id: !extend control_leds
     then:
       - if:
@@ -161,13 +192,13 @@ script:
                         media_player.is_announcing: external_media_player
                 then:
                   - lambda: id(play_sound).execute(false, id(va_sound_key));
-            - delay: 1s
+            - delay: 3s
   - id: va_ring_timeout
     mode: restart
     then:
       - delay: !lambda return uint32_t(id(va_max_ring_secs)) * 1000u;
+      - lambda: id(va_alarm_dismissed) = false;
       - switch.turn_off: va_alarm_ringing
-
 interval:
   - interval: 1s
     then:
@@ -300,6 +331,7 @@ api:
                   data: !lambda root["accepted"] = false;
     - action: voice_alarms_stop
       then:
+        - lambda: id(va_alarm_dismissed) = true;
         - switch.turn_off: va_alarm_ringing
     - action: voice_alarms_test
       then:
@@ -311,6 +343,7 @@ micro_wake_word:
         condition:
           switch.is_on: va_alarm_ringing
         then:
+          - lambda: id(va_alarm_dismissed) = true;
           - switch.turn_off: va_alarm_ringing
           - voice_assistant.stop:
 
@@ -320,5 +353,6 @@ voice_assistant:
         condition:
           switch.is_on: va_alarm_ringing
         then:
+          - lambda: id(va_alarm_dismissed) = true;
           - switch.turn_off: va_alarm_ringing
           - voice_assistant.stop:

@@ -26,8 +26,8 @@ def test_alarm_led_feedback_tracks_ringing():
         Path("esphome/voice_alarms_snippet.yaml").read_text(), Loader=FirmwareLoader
     )
     ringing = next(s for s in config["switch"] if s["id"] == "va_alarm_ringing")
-    for transition in ("on_turn_on", "on_turn_off"):
-        assert ringing[transition][-1] == {"script.execute": "control_leds"}
+    assert ringing["on_turn_on"][-1] == {"script.execute": "va_alarm_led_ringing"}
+    assert ringing["on_turn_off"][-1] == {"script.execute": "va_alarm_led_off"}
 
     leds = next(s for s in config["script"] if s["id"] == "control_leds")
     assert leds["then"] == [
