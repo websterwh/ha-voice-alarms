@@ -79,10 +79,20 @@ action:
       - set_conversation_response: "Sorry, I couldn't identify which satellite you're speaking from."
       - stop: "Satellite absent or ambiguous."
 
-  # Normalize STT time format: "5.51 PM" -> "5:51 PM"
+  # Normalize STT time format: "9 30 p.m." -> "9:30 PM", "5.51 PM" -> "5:51 PM"
   - variables:
-      normalized_time: "{{ trigger.slots.time | replace('.', ':') }}"
-
+      normalized_time: >-
+        {{
+          trigger.slots.time
+          | replace('p.m.', 'PM')
+          | replace('a.m.', 'AM')
+          | replace('p.m', 'PM')
+          | replace('a.m', 'AM')
+          | replace('.', ':')
+          | regex_replace('\\s+(\\d\\d)\\s*(AM|PM)', ':\\1 \\2')
+          | regex_replace('\\s+(\\d)\\s*(AM|PM)', ':0\\1 \\2')
+          | trim
+        }}
   # Map trigger id → repeat value passed to the integration.
   - variables:
       repeat_value: once
