@@ -571,6 +571,18 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
                         time_text = f"{h}:{m} {ap.upper()}"
 
         repeat = self._parse_repeat(repeat_text)
+
+        try:
+            result = await self.coordinator.async_command({
+                "satellite": satellite,
+                "operation": "set",
+                "time": time_text,
+                "repeat": repeat,
+            })
+            response = intent_obj.create_response()
+            response.async_set_speech(result["response"])
+            return response
+        except ValueError:
             response = intent_obj.create_response()
             response.async_set_speech("Use a time such as 7 AM or 19:30.")
             return response
