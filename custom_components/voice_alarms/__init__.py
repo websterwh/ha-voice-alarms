@@ -53,17 +53,18 @@ COMMAND_SCHEMA = SATELLITE_SCHEMA.extend(
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Configure through the UI only."""
-    # Load intent file
-    import os
-    intent_path = os.path.join(os.path.dirname(__file__), "intents", "en.yaml")
-    if os.path.exists(intent_path):
-        hass.helpers.intent.async_register_intents_from_file(intent_path)
     return True
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load alarms and register their scheduler and services."""
     coordinator = AlarmCoordinator(hass, entry)
     await coordinator.async_load()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    # Load intent file (hass.helpers available here)
+    import os
+    intent_path = os.path.join(os.path.dirname(__file__), "intents", "en.yaml")
+    if os.path.exists(intent_path):
+        hass.helpers.intent.async_register_intents_from_file(intent_path)
 
     # Forward to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
