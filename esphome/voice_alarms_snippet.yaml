@@ -77,9 +77,9 @@ switch:
           id: media_mixing_input
           decibel_reduction: 20
           duration: 0s
+      - switch.turn_on: timer_ringing
       - script.execute: va_ring_alarm
       - script.execute: va_ring_timeout
-      - script.execute: va_alarm_led_ringing
     on_turn_off:
       - script.stop: va_ring_alarm
       - script.stop: va_ring_timeout
@@ -95,9 +95,7 @@ switch:
                 decibel_reduction: 0
                 duration: 1s
             - micro_wake_word.disable_model: stop
-      - script.execute: va_alarm_led_off
-
-binary_sensor:
+      - switch.turn_off: timer_ringing
   - platform: template
     id: va_alarm_ringing_sensor
     name: Alarm Ringing
@@ -120,55 +118,30 @@ button:
       - switch.turn_on: va_alarm_ringing
 
 script:
-  # Reapply the native timer animation after upstream LED arbitration, including
-  # playback and connection changes. Turning off restores the upstream state.
-  # Alarm LED animation - runs native timer-ringing effect WITHOUT the final
-  # control_leds call that would reset LEDs based on timer_ringing state.
-  - id: va_alarm_led_ringing
+  # Alarm LED handled by upstream control_leds via timer_ringing switch
+  - id: va_ring_alarm
     mode: restart
     then:
       - while:
           condition:
             switch.is_on: va_alarm_ringing
           then:
-            - light.turn_on:
-                brightness: !lambda |-
-                  if (id(voice_kit_component).is_failed()) return 0;
-                  return 66;
-                red: 100%
-                green: 40%
-                blue: 0%
-                id: voice_assistant_leds
-                effect: "Rainbow"
-            - delay: 2s
-  - id: va_alarm_led_off
+            - micro_wake_word.enable_model: stop
+            - if:
+                condition:
+                  and:
+                    - switch.is_off: timer_ringing
+                    - not:
+                        media_player.is_announcing: external_media_player
+                then:
+                  - lambda: id(play_sound).execute(false, id(va_sound_key));
+            - delay: 3s
+  - id: va_ring_timeout
+    mode: restart
     then:
-      - if:
-          condition:
-            lambda: return id(va_alarm_dismissed);
-          then:
-            - script.execute: va_alarm_led_dismissed
-      - script.execute: control_leds
-  - id: va_alarm_led_dismissed
-    then:
-      # Quick green flash to confirm alarm was dismissed
-      - light.turn_on:
-          brightness: 80
-          red: 0%
-          green: 100%
-          blue: 0%
-          id: voice_assistant_leds
-      - delay: 200ms
-      - light.turn_off: voice_assistant_leds
-      - delay: 100ms
-      - light.turn_on:
-          brightness: 80
-          red: 0%
-          green: 100%
-          blue: 0%
-          id: voice_assistant_leds
-      - delay: 200ms
-      - light.turn_off: voice_assistant_leds
+      - delay: !lambda return uint32_t(id(va_max_ring_secs)) * 1000u;
+      - lambda: id(va_alarm_dismissed) = false;
+      - switch.turn_off: va_alarm_ringing
   - id: !extend control_leds
     then:
       - if:
