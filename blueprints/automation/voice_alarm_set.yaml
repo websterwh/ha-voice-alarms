@@ -79,6 +79,10 @@ action:
       - set_conversation_response: "Sorry, I couldn't identify which satellite you're speaking from."
       - stop: "Satellite absent or ambiguous."
 
+  # Normalize STT time format: "5.51 PM" -> "5:51 PM"
+  - variables:
+      normalized_time: "{{ trigger.slots.time | replace('.', ':') }}"
+
   # Map trigger id → repeat value passed to the integration.
   - variables:
       repeat_value: once
@@ -112,7 +116,7 @@ action:
     data:
       satellite: "{{ satellite_entity }}"
       operation: set
-      time: "{{ trigger.slots.time }}"
+      time: "{{ normalized_time }}"
       repeat: "{{ repeat_value }}"
     response_variable: result
 

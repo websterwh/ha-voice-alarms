@@ -55,5 +55,20 @@
       "local_not_subset": "Local satellites must be a subset of the selected satellite devices.",
       "sound_not_available": "The selected sound is not available on one or more local satellites."
     }
+  },
+  "entity": {
+    "sensor": {
+      "voice_alarms": {
+        "name": "Voice Alarms",
+        "state": {
+          "no_alarms": "No alarms"
+        }
+      }
+    },
+    "button": {
+      "cancel_alarm": {
+        "name": "Cancel Alarm"
+      }
+    }
   }
 }

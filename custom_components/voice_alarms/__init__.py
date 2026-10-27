@@ -60,10 +60,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = AlarmCoordinator(hass, entry)
     await coordinator.async_load()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-
-    async def command(call: ServiceCall) -> dict:
-        return await coordinator.async_command(dict(call.data))
-
+    # Forward to sensor platform
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
     async def sync(call: ServiceCall) -> None:
         async with coordinator.lock:
             await coordinator.async_sync(call.data.get("satellite"), force=True)
@@ -148,6 +146,16 @@ class AlarmCoordinator:
         self.ringing: dict[str, asyncio.Task] = {}
         self.last_payload: dict[str, str] = {}
         self.pending_clear: set[str] = set()
+        self._update_listeners: list[callable] = []
+
+    def async_add_update_listener(self, listener: callable) -> callable:
+        """Register a listener for alarm changes."""
+        self._update_listeners.append(listener)
+        return lambda: self._update_listeners.remove(listener)
+
+    def _notify_update(self) -> None:
+        for listener in self._update_listeners:
+            listener()
 
     async def async_load(self) -> None:
         data = await self.store.async_load()
@@ -162,7 +170,7 @@ class AlarmCoordinator:
                 "pending_clear": sorted(self.pending_clear),
             }
         )
-
+        self._notify_update()
     def validate_satellite(self, satellite: str) -> None:
         if satellite not in self.satellites:
             raise ServiceValidationError(
@@ -505,4 +513,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_shutdown()
     for name in ("command", "sync", "test_alarm"):
         hass.services.async_remove(DOMAIN, name)
+    await hass.config_entries.async_unload_platforms(entry, ["sensor", "button"])
     return True
