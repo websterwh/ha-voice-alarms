@@ -537,8 +537,6 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
     def __init__(self, coordinator: AlarmCoordinator) -> None:
         self.coordinator = coordinator
 
-    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
-        """Handle the intent."""
         slots = intent_obj.slots
         satellite = self._resolve_satellite(intent_obj.context)
         if not satellite:
@@ -550,19 +548,29 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
         # Normalize time (same logic as blueprint)
         time_text = self._normalize_time(time_text)
 
-        repeat = self._parse_repeat(repeat_text)
+        # Fallback: if slot extraction failed, try to extract time from full text
+        if not time_text or not any(c.isdigit() for c in time_text):
+            full_text = slots.get("text", {}).get("value", "") or str(slots)
+            import re
+            # Look for time patterns in the full text
+            time_match = re.search(r'(\d{1,2})[.:]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)', full_text, re.IGNORECASE)
+            if time_match:
+                h, m, ap = time_match.groups()
+                m = m or "00"
+                time_text = f"{h}:{m} {ap.upper().replace('.', '')}"
+            else:
+                time_match = re.search(r'(\d{1,2})\s+(\d{2})\s*(am|pm|a\.m\.|p\.m\.)', full_text, re.IGNORECASE)
+                if time_match:
+                    h, m, ap = time_match.groups()
+                    time_text = f"{h}:{m} {ap.upper().replace('.', '')}"
+                else:
+                    time_match = re.search(r'at\s+(\d{1,2})[.:]?(\d{2})?\s*(am|pm)', full_text, re.IGNORECASE)
+                    if time_match:
+                        h, m, ap = time_match.groups()
+                        m = m or "00"
+                        time_text = f"{h}:{m} {ap.upper()}"
 
-        try:
-            result = await self.coordinator.async_command({
-                "satellite": satellite,
-                "operation": "set",
-                "time": time_text,
-                "repeat": repeat,
-            })
-            response = intent_obj.create_response()
-            response.async_set_speech(result["response"])
-            return response
-        except ValueError:
+        repeat = self._parse_repeat(repeat_text)
             response = intent_obj.create_response()
             response.async_set_speech("Use a time such as 7 AM or 19:30.")
             return response
