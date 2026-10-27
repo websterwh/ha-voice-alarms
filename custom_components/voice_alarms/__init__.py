@@ -60,11 +60,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_load()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    # Load intent file (hass.helpers available here)
-    import os
-    intent_path = os.path.join(os.path.dirname(__file__), "intents", "en.yaml")
-    if os.path.exists(intent_path):
-        intent.async_register_intents_from_file(intent_path)
 
     # Forward to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
