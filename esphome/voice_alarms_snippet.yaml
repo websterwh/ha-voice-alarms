@@ -76,7 +76,7 @@ switch:
           duration: 0s
       - script.execute: va_ring_alarm
       - script.execute: va_ring_timeout
-      - script.execute: control_leds_timer_ringing
+      - script.execute: va_alarm_led_ringing
     on_turn_off:
       - script.stop: va_ring_alarm
       - script.stop: va_ring_timeout
@@ -92,7 +92,7 @@ switch:
                 decibel_reduction: 0
                 duration: 1s
             - micro_wake_word.disable_model: stop
-      - script.execute: control_leds
+      - script.execute: va_alarm_led_off
 
 binary_sensor:
   - platform: template
@@ -119,6 +119,25 @@ button:
 script:
   # Reapply the native timer animation after upstream LED arbitration, including
   # playback and connection changes. Turning off restores the upstream state.
+  # Alarm LED animation - runs native timer-ringing effect WITHOUT the final
+  # control_leds call that would reset LEDs based on timer_ringing state.
+  - id: va_alarm_led_ringing
+    then:
+      - light.turn_on:
+          brightness: !lambda |-
+            if (id(voice_kit_component).is_failed()) return 0;
+            return 66;
+          red: 100%
+          green: 40%
+          blue: 0%
+          id: voice_assistant_leds
+          effect: "Rainbow"
+      - delay: 1s
+      - lambda: !lambda |-
+          id(dial_touched) = false;
+  - id: va_alarm_led_off
+    then:
+      - script.execute: control_leds
   - id: !extend control_leds
     then:
       - if:
