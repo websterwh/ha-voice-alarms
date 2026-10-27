@@ -586,9 +586,12 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
         result = result.replace('p.m.', 'PM').replace('a.m.', 'AM')
         result = result.replace('p.m', 'PM').replace('a.m', 'AM')
         result = result.replace('pm', 'PM').replace('am', 'AM')
-        result = result.replace('.', ':')
+        # Remove trailing period and normalize dots to colons
+        result = result.rstrip('.').replace('.', ':')
+        # Handle "11 31 PM" -> "11:31 PM" (space between hour/minute)
         result = re.sub(r'\s+(\d\d)\s*(AM|PM)', r':\1 \2', result)
         result = re.sub(r'\s+(\d)\s*(AM|PM)', r':0\1 \2', result)
+        # Handle "11:31PM" -> "11:31 PM" (no space before AM/PM)
         result = re.sub(r'(\d):(\d\d)(AM|PM)', r'\1:\2 \3', result)
         return result.strip()
 
@@ -715,9 +718,12 @@ class VoiceAlarmCancelIntent(intent.IntentHandler):
         result = result.replace('p.m.', 'PM').replace('a.m.', 'AM')
         result = result.replace('p.m', 'PM').replace('a.m', 'AM')
         result = result.replace('pm', 'PM').replace('am', 'AM')
-        result = result.replace('.', ':')
+        # Remove trailing period and normalize dots to colons
+        result = result.rstrip('.').replace('.', ':')
+        # Handle "11 31 PM" -> "11:31 PM" (space between hour/minute)
         result = re.sub(r'\s+(\d\d)\s*(AM|PM)', r':\1 \2', result)
         result = re.sub(r'\s+(\d)\s*(AM|PM)', r':0\1 \2', result)
+        # Handle "11:31PM" -> "11:31 PM" (no space before AM/PM)
         result = re.sub(r'(\d):(\d\d)(AM|PM)', r'\1:\2 \3', result)
         return result.strip()
 
