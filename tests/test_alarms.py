@@ -275,6 +275,10 @@ async def test_real_storage_survives_coordinator_recreation(tmp_path):
 @pytest.mark.asyncio
 async def test_entry_setup_and_unload_without_nonexistent_platform(tmp_path):
     hass = HomeAssistant(str(tmp_path))
+    hass.config_entries = SimpleNamespace(
+        async_forward_entry_setups=AsyncMock(),
+        async_unload_platforms=AsyncMock(return_value=True),
+    )
     cleanups, tasks = [], []
 
     def background(hass, coro, name):

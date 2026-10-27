@@ -149,29 +149,6 @@ script:
             switch.is_on: va_alarm_ringing
           then:
             - script.execute: control_leds_timer_ringing
-  - id: va_ring_alarm
-    mode: restart
-    then:
-      - while:
-          condition:
-            switch.is_on: va_alarm_ringing
-          then:
-            - micro_wake_word.enable_model: stop
-            - if:
-                condition:
-                  and:
-                    - switch.is_off: timer_ringing
-                    - not:
-                        media_player.is_announcing: external_media_player
-                then:
-                  - lambda: id(play_sound).execute(false, id(va_sound_key));
-            - delay: 3s
-  - id: va_ring_timeout
-    mode: restart
-    then:
-      - delay: !lambda return uint32_t(id(va_max_ring_secs)) * 1000u;
-      - lambda: id(va_alarm_dismissed) = false;
-      - switch.turn_off: va_alarm_ringing
 interval:
   - interval: 1s
     then:
