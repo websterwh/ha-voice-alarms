@@ -542,11 +542,16 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
         if not satellite:
             return self._error_response("Could not identify which satellite you're speaking from.")
 
+        # Try slot first, then fallback to full text extraction
         time_text = slots.get("time", {}).get("value", "")
         repeat_text = slots.get("repeat", {}).get("value", "once")
 
         # Also extract from full text in case slot parsing failed
-        full_text = slots.get("text", {}).get("value", "") or str(slots)
+        # The full text might be in a "text" slot or we can get it from the intent input
+        full_text = slots.get("text", {}).get("value", "")
+        if not full_text:
+            # Try to get raw text from intent object
+            full_text = getattr(intent_obj, "text", "") or str(slots)
 
         def extract_time(text: str) -> str:
             """Extract time from text using multiple patterns."""
