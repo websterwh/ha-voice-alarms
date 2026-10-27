@@ -1,0 +1,92 @@
+language: "en"
+intents:
+  VoiceAlarmSet:
+    data:
+      - sentences:
+          - "set [a|an|my] alarm (for|at) {time}"
+          - "set [a|an|my] alarm {time}"
+          - "wake me up (at|by) {time}"
+          - "alarm (for|at) {time}"
+          - "set [a|an|my] daily alarm (for|at) {time}"
+          - "set [a|an|my] daily alarm {time}"
+          - "set [a|an|my] (every day|everyday) alarm (for|at) {time}"
+          - "set [a|an|my] (every day|everyday) alarm {time}"
+          - "set [a|an|my] (recurring|repeating) alarm (for|at) {time}"
+          - "set [a|an|my] (recurring|repeating) alarm {time}"
+          - "set [a|an|my] weekday alarm (for|at) {time}"
+          - "set [a|an|my] weekday alarm {time}"
+          - "set [a|an|my] weekdays alarm (for|at) {time}"
+          - "set [a|an|my] weekdays alarm {time}"
+          - "set [a|an|my] weekend alarm (for|at) {time}"
+          - "set [a|an|my] weekend alarm {time}"
+          - "set [a|an|my] weekends alarm (for|at) {time}"
+          - "set [a|an|my] weekends alarm {time}"
+        slots:
+          time:
+            type: "time"
+          repeat:
+            type: "VoiceAlarmRepeat"
+    response:
+      type: "action_done"
+
+  VoiceAlarmStop:
+    data:
+      - sentences:
+          - "stop alarm"
+          - "stop the alarm"
+          - "turn off alarm"
+          - "shut off alarm"
+          - "cancel alarm"
+          - "cancel the alarm"
+        slots: {}
+    response:
+      type: "action_done"
+
+  VoiceAlarmCancel:
+    data:
+      - sentences:
+          - "cancel alarm (for|at) {time}"
+          - "cancel [the] alarm (for|at) {time}"
+          - "cancel [my] alarm (for|at) {time}"
+          - "cancel [the] [my] alarm {time}"
+          - "cancel all alarms"
+          - "cancel all my alarms"
+          - "delete alarm (for|at) {time}"
+          - "delete [the] alarm (for|at) {time}"
+          - "remove alarm (for|at) {time}"
+        slots:
+          time:
+            type: "time"
+    response:
+      type: "action_done"
+
+  VoiceAlarmList:
+    data:
+      - sentences:
+          - "list alarms"
+          - "list my alarms"
+          - "what alarms are set"
+          - "what alarms do I have"
+          - "show alarms"
+          - "what time are my alarms"
+        slots: {}
+    response:
+      type: "action_done"
+
+slots:
+  VoiceAlarmRepeat:
+    values:
+      - "once"
+      - "one time"
+      - "daily"
+      - "every day"
+      - "everyday"
+      - "recurring"
+      - "repeating"
+      - "weekday"
+      - "weekdays"
+      - "work days"
+      - "workdays"
+      - "weekend"
+      - "weekends"
+    type: "list"

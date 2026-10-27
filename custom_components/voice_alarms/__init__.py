@@ -19,6 +19,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import intent
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -52,9 +53,12 @@ COMMAND_SCHEMA = SATELLITE_SCHEMA.extend(
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Configure through the UI only."""
+    # Load intent file
+    import os
+    intent_path = os.path.join(os.path.dirname(__file__), "intents", "en.yaml")
+    if os.path.exists(intent_path):
+        hass.helpers.intent.async_register_intents_from_file(intent_path)
     return True
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load alarms and register their scheduler and services."""
     coordinator = AlarmCoordinator(hass, entry)
@@ -99,6 +103,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         schema=vol.Schema({vol.Optional("satellite"): cv.entity_id}),
     )
     hass.services.async_register(DOMAIN, "test_alarm", test, schema=SATELLITE_SCHEMA)
+
+    # Register native intent handlers for voice commands
+    intent.async_register(hass, VoiceAlarmSetIntent(coordinator))
+    intent.async_register(hass, VoiceAlarmStopIntent(coordinator))
+    intent.async_register(hass, VoiceAlarmCancelIntent(coordinator))
+    intent.async_register(hass, VoiceAlarmListIntent(coordinator))
+
     entry.async_on_unload(entry.add_update_listener(async_update_options))
     entry.async_on_unload(
         async_track_time_interval(hass, coordinator.async_tick, timedelta(seconds=5))
@@ -520,3 +531,239 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, name)
     await hass.config_entries.async_unload_platforms(entry, ["sensor", "button"])
     return True
+
+
+class VoiceAlarmSetIntent(intent.IntentHandler):
+    """Handle 'set alarm' voice commands natively."""
+
+    intent_type = "VoiceAlarmSet"
+
+    def __init__(self, coordinator: AlarmCoordinator) -> None:
+        self.coordinator = coordinator
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        """Handle the intent."""
+        slots = intent_obj.slots
+        satellite = self._resolve_satellite(intent_obj.context)
+        if not satellite:
+            return self._error_response("Could not identify which satellite you're speaking from.")
+
+        time_text = slots.get("time", {}).get("value", "")
+        repeat_text = slots.get("repeat", {}).get("value", "once")
+
+        # Normalize time (same logic as blueprint)
+        time_text = self._normalize_time(time_text)
+
+        repeat = self._parse_repeat(repeat_text)
+
+        try:
+            result = await self.coordinator.async_command({
+                "satellite": satellite,
+                "operation": "set",
+                "time": time_text,
+                "repeat": repeat,
+            })
+            response = intent_obj.create_response()
+            response.async_set_speech(result["response"])
+            return response
+        except ValueError:
+            response = intent_obj.create_response()
+            response.async_set_speech("Use a time such as 7 AM or 19:30.")
+            return response
+
+    def _resolve_satellite(self, context: intent.IntentContext) -> str | None:
+        """Find satellite by device_id from context."""
+        device_id = getattr(context, "device_id", None)
+        if not device_id:
+            return None
+        for sat in self.coordinator.satellites:
+            registry = er.async_get(self.coordinator.hass)
+            entry = registry.async_get(sat)
+            if entry and entry.device_id == device_id:
+                return sat
+        return None
+
+    def _normalize_time(self, text: str) -> str:
+        """Normalize STT time formats to HA-compatible format."""
+        import re
+        result = text
+        result = result.replace('p.m.', 'PM').replace('a.m.', 'AM')
+        result = result.replace('p.m', 'PM').replace('a.m', 'AM')
+        result = result.replace('pm', 'PM').replace('am', 'AM')
+        result = result.replace('.', ':')
+        result = re.sub(r'\s+(\d\d)\s*(AM|PM)', r':\1 \2', result)
+        result = re.sub(r'\s+(\d)\s*(AM|PM)', r':0\1 \2', result)
+        result = re.sub(r'(\d):(\d\d)(AM|PM)', r'\1:\2 \3', result)
+        return result.strip()
+
+    def _parse_repeat(self, text: str) -> str:
+        text = text.lower().strip()
+        if text in ("daily", "every day", "everyday", "recurring", "repeating"):
+            return "daily"
+        if text in ("weekday", "weekdays", "work days", "workdays"):
+            return "weekdays"
+        if text in ("weekend", "weekends"):
+            return "weekends"
+        return "once"
+
+    def _error_response(self, msg: str) -> intent.IntentResponse:
+        response = intent.IntentResponse()
+        response.async_set_speech(msg)
+        return response
+
+
+class VoiceAlarmStopIntent(intent.IntentHandler):
+    """Handle 'stop alarm' voice commands natively."""
+
+    intent_type = "VoiceAlarmStop"
+
+    def __init__(self, coordinator: AlarmCoordinator) -> None:
+        self.coordinator = coordinator
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        satellite = self._resolve_satellite(intent_obj.context)
+        if not satellite:
+            return self._error_response("Could not identify which satellite you're speaking from.")
+
+        result = await self.coordinator.async_command({
+            "satellite": satellite,
+            "operation": "stop",
+        })
+        response = intent_obj.create_response()
+        response.async_set_speech(result["response"])
+        return response
+
+    def _resolve_satellite(self, context: intent.IntentContext) -> str | None:
+        device_id = getattr(context, "device_id", None)
+        if not device_id:
+            return None
+        for sat in self.coordinator.satellites:
+            registry = er.async_get(self.coordinator.hass)
+            entry = registry.async_get(sat)
+            if entry and entry.device_id == device_id:
+                return sat
+        return None
+
+    def _error_response(self, msg: str) -> intent.IntentResponse:
+        response = intent.IntentResponse()
+        response.async_set_speech(msg)
+        return response
+
+
+class VoiceAlarmCancelIntent(intent.IntentHandler):
+    """Handle 'cancel alarm' voice commands natively."""
+
+    intent_type = "VoiceAlarmCancel"
+
+    def __init__(self, coordinator: AlarmCoordinator) -> None:
+        self.coordinator = coordinator
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        slots = intent_obj.slots
+        satellite = self._resolve_satellite(intent_obj.context)
+        if not satellite:
+            return self._error_response("Could not identify which satellite you're speaking from.")
+
+        time_text = slots.get("time", {}).get("value", "")
+
+        if time_text:
+            time_text = self._normalize_time(time_text)
+            try:
+                hour, minute = parse_time(time_text)
+                time_text = f"{hour:02}:{minute:02}"
+            except ValueError:
+                response = intent_obj.create_response()
+                response.async_set_speech("Use a time such as 7 AM or 19:30.")
+                return response
+        else:
+            # No time specified - cancel the only alarm or ask which
+            active = [
+                a for a in self.coordinator.alarms
+                if a.satellite == satellite
+                and (a.once_at is None or a.once_at > dt_util.utcnow().timestamp())
+            ]
+            if len(active) == 1:
+                time_text = f"{active[0].hour:02}:{active[0].minute:02}"
+            elif len(active) > 1:
+                response = intent_obj.create_response()
+                response.async_set_speech("Say which alarm time to cancel, or cancel all alarms.")
+                return response
+            else:
+                response = intent_obj.create_response()
+                response.async_set_speech("No alarms are set.")
+                return response
+
+        result = await self.coordinator.async_command({
+            "satellite": satellite,
+            "operation": "cancel",
+            "time": time_text,
+        })
+        response = intent_obj.create_response()
+        response.async_set_speech(result["response"])
+        return response
+
+    def _resolve_satellite(self, context: intent.IntentContext) -> str | None:
+        device_id = getattr(context, "device_id", None)
+        if not device_id:
+            return None
+        for sat in self.coordinator.satellites:
+            registry = er.async_get(self.coordinator.hass)
+            entry = registry.async_get(sat)
+            if entry and entry.device_id == device_id:
+                return sat
+        return None
+
+    def _normalize_time(self, text: str) -> str:
+        import re
+        result = text
+        result = result.replace('p.m.', 'PM').replace('a.m.', 'AM')
+        result = result.replace('p.m', 'PM').replace('a.m', 'AM')
+        result = result.replace('pm', 'PM').replace('am', 'AM')
+        result = result.replace('.', ':')
+        result = re.sub(r'\s+(\d\d)\s*(AM|PM)', r':\1 \2', result)
+        result = re.sub(r'\s+(\d)\s*(AM|PM)', r':0\1 \2', result)
+        result = re.sub(r'(\d):(\d\d)(AM|PM)', r'\1:\2 \3', result)
+        return result.strip()
+
+    def _error_response(self, msg: str) -> intent.IntentResponse:
+        response = intent.IntentResponse()
+        response.async_set_speech(msg)
+        return response
+
+
+class VoiceAlarmListIntent(intent.IntentHandler):
+    """Handle 'list alarms' voice commands natively."""
+
+    intent_type = "VoiceAlarmList"
+
+    def __init__(self, coordinator: AlarmCoordinator) -> None:
+        self.coordinator = coordinator
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        satellite = self._resolve_satellite(intent_obj.context)
+        if not satellite:
+            return self._error_response("Could not identify which satellite you're speaking from.")
+
+        result = await self.coordinator.async_command({
+            "satellite": satellite,
+            "operation": "list",
+        })
+        response = intent_obj.create_response()
+        response.async_set_speech(result["response"])
+        return response
+
+    def _resolve_satellite(self, context: intent.IntentContext) -> str | None:
+        device_id = getattr(context, "device_id", None)
+        if not device_id:
+            return None
+        for sat in self.coordinator.satellites:
+            registry = er.async_get(self.coordinator.hass)
+            entry = registry.async_get(sat)
+            if entry and entry.device_id == device_id:
+                return sat
+        return None
+
+    def _error_response(self, msg: str) -> intent.IntentResponse:
+        response = intent.IntentResponse()
+        response.async_set_speech(msg)
+        return response
