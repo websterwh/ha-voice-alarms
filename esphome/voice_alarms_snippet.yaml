@@ -76,7 +76,7 @@ switch:
           duration: 0s
       - script.execute: va_ring_alarm
       - script.execute: va_ring_timeout
-      - script.execute: control_leds
+      - script.execute: control_leds_timer_ringing
     on_turn_off:
       - script.stop: va_ring_alarm
       - script.stop: va_ring_timeout
