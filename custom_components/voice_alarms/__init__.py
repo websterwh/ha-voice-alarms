@@ -537,6 +537,7 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
     def __init__(self, coordinator: AlarmCoordinator) -> None:
         self.coordinator = coordinator
 
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
         slots = intent_obj.slots
         satellite = self._resolve_satellite(intent_obj.context)
         if not satellite:
