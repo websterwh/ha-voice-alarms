@@ -88,9 +88,12 @@ action:
           | replace('a.m.', 'AM')
           | replace('p.m', 'PM')
           | replace('a.m', 'AM')
+          | replace('pm', 'PM')
+          | replace('am', 'AM')
           | replace('.', ':')
           | regex_replace('\\s+(\\d\\d)\\s*(AM|PM)', ':\\1 \\2')
           | regex_replace('\\s+(\\d)\\s*(AM|PM)', ':0\\1 \\2')
+          | regex_replace('(\\d):(\\d\\d)(AM|PM)', '\\1:\\2 \\3')
           | trim
         }}
   # Map trigger id → repeat value passed to the integration.
