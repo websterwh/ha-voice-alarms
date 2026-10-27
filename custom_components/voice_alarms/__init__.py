@@ -545,30 +545,34 @@ class VoiceAlarmSetIntent(intent.IntentHandler):
         time_text = slots.get("time", {}).get("value", "")
         repeat_text = slots.get("repeat", {}).get("value", "once")
 
-        # Normalize time (same logic as blueprint)
-        time_text = self._normalize_time(time_text)
+        # Also extract from full text in case slot parsing failed
+        full_text = slots.get("text", {}).get("value", "") or str(slots)
 
-        # Fallback: if slot extraction failed, try to extract time from full text
-        if not time_text or not any(c.isdigit() for c in time_text):
-            full_text = slots.get("text", {}).get("value", "") or str(slots)
+        def extract_time(text: str) -> str:
+            """Extract time from text using multiple patterns."""
             import re
-            # Look for time patterns in the full text
-            time_match = re.search(r'(\d{1,2})[.:]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)', full_text, re.IGNORECASE)
-            if time_match:
-                h, m, ap = time_match.groups()
+            # Pattern 1: "12:55 AM" or "12.55 AM" or "12 55 AM"
+            m = re.search(r'(\d{1,2})[.:]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)', text, re.IGNORECASE)
+            if m:
+                h, m, ap = m.groups()
                 m = m or "00"
-                time_text = f"{h}:{m} {ap.upper().replace('.', '')}"
-            else:
-                time_match = re.search(r'(\d{1,2})\s+(\d{2})\s*(am|pm|a\.m\.|p\.m\.)', full_text, re.IGNORECASE)
-                if time_match:
-                    h, m, ap = time_match.groups()
-                    time_text = f"{h}:{m} {ap.upper().replace('.', '')}"
-                else:
-                    time_match = re.search(r'at\s+(\d{1,2})[.:]?(\d{2})?\s*(am|pm)', full_text, re.IGNORECASE)
-                    if time_match:
-                        h, m, ap = time_match.groups()
-                        m = m or "00"
-                        time_text = f"{h}:{m} {ap.upper()}"
+                return f"{h}:{m} {ap.upper().replace('.', '')}"
+            # Pattern 2: "at 12:55 AM"
+            m = re.search(r'at\s+(\d{1,2})[.:]?(\d{2})?\s*(am|pm)', text, re.IGNORECASE)
+            if m:
+                h, m, ap = m.groups()
+                m = m or "00"
+                return f"{h}:{m} {ap.upper()}"
+            return ""
+
+        # Try slot time first
+        if time_text:
+            time_text = self._normalize_time(time_text)
+
+        # Always try full text extraction as backup/override
+        extracted = extract_time(full_text)
+        if extracted:
+            time_text = extracted
 
         repeat = self._parse_repeat(repeat_text)
 
