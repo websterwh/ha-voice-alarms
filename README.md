@@ -56,7 +56,7 @@ substitutions:
 
 packages:
   Nabu Casa.Home Assistant Voice PE: github://esphome/home-assistant-voice-pe/home-assistant-voice.yaml@d4e6fa43d6a1a7d342b7d4d403567e06516719de
-  voice_alarms: github://websterwh/ha-voice-alarms/esphome/voice_alarms_snippet.yaml@master
+  voice_alarms: github://websterwh/ha-voice-alarms/esphome/voice_alarms_snippet.yaml@v2.1.1
 ```
 
 The upstream pin identifies the Voice PE package used for validation. Don't add a second copy of that upstream package under another key. The complete alarm implementation is the [downloadable ESPHome package](https://raw.githubusercontent.com/websterwh/ha-voice-alarms/master/esphome/voice_alarms_snippet.yaml); the README imports that same file instead of maintaining another implementation. No external header, I²S pin replacements, `on_alarm_set`, or `data/` directory are needed.
