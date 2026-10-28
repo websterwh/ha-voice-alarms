@@ -38,6 +38,12 @@ def test_alarm_led_feedback_tracks_ringing():
             }
         }
     ]
+    assert "binary_sensor" in config
+    sensor = next(s for s in config["binary_sensor"] if s.get("id") == "va_alarm_ringing_sensor")
+    assert sensor["name"] == "Alarm Ringing"
+    center = next(s for s in config["binary_sensor"] if s.get("id") == "center_button")
+    assert any("switch.turn_off" in step and step["switch.turn_off"] == "va_alarm_ringing"
+               for step in center["on_press"][0]["if"]["then"])
 
 
 def test_actual_firmware_sync_and_scheduler(tmp_path):

@@ -96,6 +96,8 @@ switch:
                 duration: 1s
             - micro_wake_word.disable_model: stop
       - switch.turn_off: timer_ringing
+
+binary_sensor:
   - platform: template
     id: va_alarm_ringing_sensor
     name: Alarm Ringing
