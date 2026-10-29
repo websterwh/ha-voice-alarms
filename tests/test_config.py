@@ -12,47 +12,14 @@ from custom_components.voice_alarms.config_flow import (
 
 
 @pytest.mark.parametrize(
-    "data,sounds,error",
+    "data,error",
     [
-        ({"satellite_devices": []}, {}, "satellite_devices"),
-        (
-            {
-                "satellite_devices": ["assist_satellite.a"],
-                "local_satellites": ["assist_satellite.b"],
-            },
-            {},
-            "local_satellites",
-        ),
-        (
-            {
-                "satellite_devices": ["assist_satellite.a"],
-                "local_satellites": ["assist_satellite.a"],
-            },
-            {},
-            "sound",
-        ),
-        (
-            {
-                "satellite_devices": ["assist_satellite.a"],
-                "local_satellites": ["assist_satellite.a"],
-                "sound": "Bell.wav",
-            },
-            {"assist_satellite.a": ["Chime.wav"]},
-            "sound",
-        ),
-        (
-            {
-                "satellite_devices": ["assist_satellite.a"],
-                "local_satellites": ["assist_satellite.a"],
-                "sound": "Bell.wav",
-            },
-            {"assist_satellite.a": ["Bell.wav"]},
-            None,
-        ),
+        ({"satellite_devices": []}, "satellite_devices"),
+        ({"satellite_devices": ["assist_satellite.a"]}, None),
     ],
 )
-def test_config_rejects_unavailable_sounds_and_invalid_scope(data, sounds, error):
-    errors = _validate(data, sounds)
+def test_config_requires_satellite_selection(data, error):
+    errors = _validate(data, {})
     assert (error in errors) if error else errors == {}
 
 
@@ -91,3 +58,9 @@ def test_schema_sound_dropdown_preserves_filenames():
         validator for key, validator in schema.schema.items() if str(key) == "sound"
     )
     assert sound("My Bell.wav") == "My Bell.wav"
+
+
+def test_schema_selects_each_satellite_once():
+    schema = _build_schema([], ["My Bell.wav"], {})
+    fields = {str(key) for key in schema.schema}
+    assert fields == {"max_ring_time", "satellite_devices", "sound"}

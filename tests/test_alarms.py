@@ -219,7 +219,50 @@ async def test_native_service_uses_registry_and_real_node_name(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_unknown_satellite_rejected(coordinator):
+async def test_echolocal_service_capability_sets_and_cancels_its_own_alarm(coordinator):
+    entry = SimpleNamespace(
+        domain="esphome",
+        runtime_data=SimpleNamespace(device_info=SimpleNamespace(name="bedroom-echo")),
+    )
+    registered = SimpleNamespace(config_entry_id="esphome_entry")
+    coordinator.hass.config_entries = SimpleNamespace(async_get_entry=lambda key: entry)
+    set_handler = AsyncMock()
+    delete_handler = AsyncMock()
+    coordinator.hass.services.async_register(
+        "esphome", "bedroom_echo_alarm_set", set_handler
+    )
+    coordinator.hass.services.async_register(
+        "esphome", "bedroom_echo_alarm_delete", delete_handler
+    )
+    with (
+        patch.object(
+            er,
+            "async_get",
+            return_value=SimpleNamespace(async_get=lambda entity: registered),
+        ),
+        patch("custom_components.voice_alarms.dt_util.now", return_value=NOW),
+    ):
+        result = await coordinator.async_command(
+            {"satellite": BED, "operation": "set", "time": "8 AM", "repeat": "daily"}
+        )
+        assert result == {"response": "Alarm set for 08:00 daily."}
+        set_data = set_handler.call_args.args[0].data
+        assert set_data["time"] == "08:00"
+        assert set_data["days"] == "daily"
+        assert set_data["label"].startswith("Voice Alarms ")
+
+        result = await coordinator.async_command(
+            {"satellite": BED, "operation": "cancel", "time": "8 AM"}
+        )
+        assert result == {"response": "Alarm cancelled."}
+        assert delete_handler.call_args.args[0].data == {
+            "time": "08:00",
+            "label": set_data["label"],
+        }
+
+
+@pytest.mark.asyncio
+async def test_rejects_unconfigured_satellite(coordinator):
     with pytest.raises(ServiceValidationError):
         await coordinator.async_command(
             {"satellite": "assist_satellite.stranger", "operation": "list"}
@@ -315,6 +358,7 @@ async def test_entry_setup_and_unload_without_nonexistent_platform(tmp_path):
 async def test_offline_local_removal_reloads_and_defers_cleanup(coordinator):
     coordinator.local = {BED}
     coordinator.async_native = AsyncMock(side_effect=HomeAssistantError("offline"))
+    coordinator.entry.options = {"satellite_devices": [DESK]}
     coordinator.hass.data["voice_alarms"] = {"test": coordinator}
     reload = AsyncMock()
     coordinator.hass.config_entries = SimpleNamespace(async_reload=reload)

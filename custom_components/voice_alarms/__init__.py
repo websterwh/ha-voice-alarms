@@ -22,9 +22,6 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    ALARM_MODE_LOCAL_PREFERRED,
-    CONF_ALARM_MODE,
-    CONF_LOCAL_SATELLITES,
     CONF_MAX_RING_TIME,
     CONF_SATELLITE_DEVICES,
     CONF_SOUND,
@@ -36,6 +33,15 @@ from .models import Alarm, new_alarm, parse_time
 from .voice import async_register_voice
 
 _LOGGER = logging.getLogger(__name__)
+NATIVE_PACKAGE = "voice_alarms_package"
+NATIVE_ECHOLOCAL = "echolocal"
+NATIVE_FALLBACK = "home_assistant"
+ECHOLOCAL_DAYS = {
+    "once": "",
+    "daily": "daily",
+    "weekdays": "weekdays",
+    "weekends": "weekends",
+}
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 SATELLITE_SCHEMA = vol.Schema({vol.Required("satellite"): cv.entity_id})
 COMMAND_SCHEMA = SATELLITE_SCHEMA.extend(
@@ -116,6 +122,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             and (old is None or old.state in ("unavailable", "unknown"))
         ):
             coordinator.last_payload.pop(event.data["entity_id"], None)
+            coordinator.native_profiles.pop(event.data["entity_id"], None)
             entry.async_create_background_task(
                 hass, coordinator.async_background_sync(), "Voice alarm reconnect sync"
             )
@@ -139,11 +146,10 @@ class AlarmCoordinator:
         self.entry = entry
         self.config = {**entry.data, **entry.options}
         self.satellites = list(self.config.get(CONF_SATELLITE_DEVICES, []))
-        self.local = (
-            set(self.config.get(CONF_LOCAL_SATELLITES, []))
-            if self.config.get(CONF_ALARM_MODE) == ALARM_MODE_LOCAL_PREFERRED
-            else set()
-        )
+        # Local execution is a device capability, not a second user-selected
+        # list. Legacy entries are deliberately ignored here.
+        self.local: set[str] = set()
+        self.native_profiles: dict[str, str] = {}
         self.max_minutes = int(
             self.config.get(CONF_MAX_RING_TIME, DEFAULT_MAX_RING_TIME)
         )
@@ -186,10 +192,10 @@ class AlarmCoordinator:
             )
 
     def is_local(self, satellite: str) -> bool:
-        return satellite in self.local
+        return self.native_profile(satellite) != NATIVE_FALLBACK
 
-    def native_name(self, satellite: str, action: str) -> str:
-        """Use the actual ESPHome node name, never a friendly-name guess."""
+    def _native_service_name(self, satellite: str, action: str) -> str:
+        """Build an ESPHome action service name using its actual node name."""
         registry_entry = er.async_get(self.hass).async_get(satellite)
         if registry_entry is None or registry_entry.config_entry_id is None:
             raise ServiceValidationError(f"{satellite} has no registered integration.")
@@ -206,21 +212,55 @@ class AlarmCoordinator:
             raise ServiceValidationError(
                 f"{satellite} must be a connected ESPHome satellite for local alarms."
             )
-        name = f"{device_info.name.replace('-', '_')}_{action}"
+        return f"{device_info.name.replace('-', '_')}_{action}"
+
+    def native_name(self, satellite: str, action: str) -> str:
+        """Return an available ESPHome action service."""
+        name = self._native_service_name(satellite, action)
         if not self.hass.services.has_service("esphome", name):
             raise ServiceValidationError(
-                f"Missing esphome.{name}. Flash the Voice Alarms package and reconnect the device."
+                f"Missing esphome.{name}. Reconnect the device or install its alarm firmware."
             )
         return name
+
+    def native_profile(self, satellite: str) -> str:
+        """Detect the on-device alarm API exposed by a configured satellite."""
+        if satellite in self.native_profiles:
+            return self.native_profiles[satellite]
+        # Explicit test setup retains the package behavior without requiring a
+        # registry-backed ESPHome config entry.
+        if satellite in self.local:
+            return NATIVE_PACKAGE
+        try:
+            package_sync = self._native_service_name(satellite, "voice_alarms_sync")
+            echo_set = self._native_service_name(satellite, "alarm_set")
+        except (AttributeError, ServiceValidationError):
+            profile = NATIVE_FALLBACK
+        else:
+            if self.hass.services.has_service("esphome", package_sync):
+                profile = NATIVE_PACKAGE
+            elif self.hass.services.has_service("esphome", echo_set):
+                profile = NATIVE_ECHOLOCAL
+            else:
+                profile = NATIVE_FALLBACK
+        self.native_profiles[satellite] = profile
+        if profile != NATIVE_FALLBACK:
+            self.local.add(satellite)
+        return profile
 
     async def async_native(
         self, satellite: str, action: str, data: dict | None = None
     ) -> None:
+        service = self.native_name(satellite, action)
+        if not self.hass.services.has_service("esphome", service):
+            raise ServiceValidationError(
+                f"Missing esphome.{service}. Reconnect the device or install its alarm firmware."
+            )
         try:
             async with asyncio.timeout(3):
                 await self.hass.services.async_call(
                     "esphome",
-                    self.native_name(satellite, action),
+                    service,
                     data or {},
                     blocking=True,
                     return_response=action == "voice_alarms_sync",
@@ -229,6 +269,37 @@ class AlarmCoordinator:
             raise HomeAssistantError(
                 f"Alarm device {satellite} did not respond within three seconds."
             ) from err
+
+    async def async_echolocal_set(self, satellite: str, alarm: Alarm) -> None:
+        """Create the equivalent alarm through EchoLocal's native API."""
+        service = self.native_name(satellite, "alarm_set")
+        if not self.hass.services.has_service("esphome", service):
+            raise ServiceValidationError(f"Missing esphome.{service}.")
+        await self.hass.services.async_call(
+            "esphome",
+            service,
+            {
+                "time": f"{alarm.hour:02}:{alarm.minute:02}",
+                "days": ECHOLOCAL_DAYS[alarm.repeat],
+                "label": f"Voice Alarms {alarm.id}",
+            },
+            blocking=True,
+        )
+
+    async def async_echolocal_delete(self, satellite: str, alarm: Alarm) -> None:
+        """Remove a Voice Alarms-owned EchoLocal alarm without touching others."""
+        service = self.native_name(satellite, "alarm_delete")
+        if not self.hass.services.has_service("esphome", service):
+            raise ServiceValidationError(f"Missing esphome.{service}.")
+        await self.hass.services.async_call(
+            "esphome",
+            service,
+            {
+                "time": f"{alarm.hour:02}:{alarm.minute:02}",
+                "label": f"Voice Alarms {alarm.id}",
+            },
+            blocking=True,
+        )
 
     def payload(self, satellite: str, *, clear: bool = False) -> str:
         alarms = (
@@ -255,7 +326,7 @@ class AlarmCoordinator:
         if satellite is not None:
             self.validate_satellite(satellite)
         for target in [satellite] if satellite else self.satellites:
-            if not self.is_local(target):
+            if self.native_profile(target) != NATIVE_PACKAGE:
                 continue
             payload = self.payload(target)
             if force or self.last_payload.get(target) != payload:
@@ -288,7 +359,7 @@ class AlarmCoordinator:
                 _LOGGER.debug("Alarm sync pending for %s: %s", satellite, err)
 
         await asyncio.gather(
-            *(sync_one(satellite) for satellite in self.local | self.pending_clear)
+            *(sync_one(satellite) for satellite in set(self.satellites) | self.pending_clear)
         )
 
     async def async_command(self, data: dict[str, Any]) -> dict[str, str]:
@@ -322,6 +393,7 @@ class AlarmCoordinator:
                 }
             previous = list(self.alarms)
             try:
+                profile = self.native_profile(satellite)
                 if operation == "set":
                     alarm = new_alarm(
                         satellite, data.get("time", ""), data.get("repeat", "once"), now
@@ -370,9 +442,18 @@ class AlarmCoordinator:
                         if operation == "cancel_all"
                         else "Alarm cancelled."
                     )
-                # A local set/cancel is not acknowledged until the device accepted the API call.
+                # A local set/cancel is not acknowledged until its device API
+                # accepts it. Package devices receive their full schedule;
+                # EchoLocal receives one add/remove call per changed alarm.
                 await self.async_save()
-                await self.async_sync(satellite, force=True)
+                if profile == NATIVE_PACKAGE:
+                    await self.async_sync(satellite, force=True)
+                elif profile == NATIVE_ECHOLOCAL:
+                    if operation == "set":
+                        await self.async_echolocal_set(satellite, alarm)
+                    else:
+                        for removed_alarm in removed:
+                            await self.async_echolocal_delete(satellite, removed_alarm)
             except ValueError:
                 self.alarms = previous
                 return {"response": "Use a time such as 7 AM or 19:30."}
@@ -487,16 +568,14 @@ class AlarmCoordinator:
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Clear schedules on devices no longer selected for local execution."""
+    """Clear package schedules on satellites removed from configuration."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     config = {**entry.data, **entry.options}
-    new_local = (
-        set(config.get(CONF_LOCAL_SATELLITES, []))
-        if config.get(CONF_ALARM_MODE) == ALARM_MODE_LOCAL_PREFERRED
-        else set()
-    )
+    new_satellites = set(config.get(CONF_SATELLITE_DEVICES, []))
     async with coordinator.lock:
-        for satellite in coordinator.local - new_local:
+        for satellite in coordinator.local - new_satellites:
+            if coordinator.native_profile(satellite) != NATIVE_PACKAGE:
+                continue
             try:
                 await coordinator.async_native(
                     satellite,

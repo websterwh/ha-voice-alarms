@@ -13,14 +13,9 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
-    ALARM_MODE_HA_FALLBACK,
-    ALARM_MODE_LOCAL_PREFERRED,
-    CONF_ALARM_MODE,
-    CONF_LOCAL_SATELLITES,
     CONF_MAX_RING_TIME,
     CONF_SATELLITE_DEVICES,
     CONF_SOUND,
-    DEFAULT_ALARM_MODE,
     DEFAULT_MAX_RING_TIME,
     DEFAULT_SOUND,
     DOMAIN,
@@ -106,34 +101,6 @@ def _build_schema(
                     multiple=True,
                 )
             ),
-            vol.Optional(
-                CONF_LOCAL_SATELLITES,
-                default=defaults.get(CONF_LOCAL_SATELLITES, []),
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=satellite_options,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    multiple=True,
-                )
-            ),
-            vol.Required(
-                CONF_ALARM_MODE,
-                default=defaults.get(CONF_ALARM_MODE, DEFAULT_ALARM_MODE),
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        selector.SelectOptionDict(
-                            value=ALARM_MODE_HA_FALLBACK,
-                            label="HA Fallback (HA announces)",
-                        ),
-                        selector.SelectOptionDict(
-                            value=ALARM_MODE_LOCAL_PREFERRED,
-                            label="Local Preferred (device rings locally)",
-                        ),
-                    ],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
             vol.Required(
                 CONF_SOUND,
                 default=defaults.get(CONF_SOUND, DEFAULT_SOUND),
@@ -158,22 +125,8 @@ def _validate(
     errors: dict[str, str] = {}
 
     satellites: list[str] = user_input.get(CONF_SATELLITE_DEVICES, [])
-    local_sats: list[str] = user_input.get(CONF_LOCAL_SATELLITES, [])
-    sound: str = user_input.get(CONF_SOUND, DEFAULT_SOUND)
-
     if not satellites:
         errors[CONF_SATELLITE_DEVICES] = "satellites_required"
-        return errors
-
-    if not set(local_sats).issubset(set(satellites)):
-        errors[CONF_LOCAL_SATELLITES] = "local_not_subset"
-        return errors
-
-    for sat in local_sats:
-        sat_opts = per_sat_sounds.get(sat)
-        if sat_opts is None or sound not in sat_opts:
-            errors[CONF_SOUND] = "sound_not_available"
-            break
 
     return errors
 
@@ -183,8 +136,6 @@ def _normalise(user_input: dict[str, Any]) -> dict[str, Any]:
     return {
         CONF_MAX_RING_TIME: int(user_input[CONF_MAX_RING_TIME]),
         CONF_SATELLITE_DEVICES: user_input.get(CONF_SATELLITE_DEVICES, []),
-        CONF_LOCAL_SATELLITES: user_input.get(CONF_LOCAL_SATELLITES, []),
-        CONF_ALARM_MODE: user_input[CONF_ALARM_MODE],
         CONF_SOUND: user_input[CONF_SOUND],
     }
 
@@ -292,8 +243,6 @@ class VoiceAlarmsOptionsFlow(config_entries.OptionsFlow):
         defaults: dict[str, Any] = user_input or {
             CONF_MAX_RING_TIME: _cv(CONF_MAX_RING_TIME, DEFAULT_MAX_RING_TIME),
             CONF_SATELLITE_DEVICES: _cv(CONF_SATELLITE_DEVICES, []),
-            CONF_LOCAL_SATELLITES: _cv(CONF_LOCAL_SATELLITES, []),
-            CONF_ALARM_MODE: _cv(CONF_ALARM_MODE, DEFAULT_ALARM_MODE),
             CONF_SOUND: _cv(CONF_SOUND, DEFAULT_SOUND),
         }
         schema = _build_schema(satellite_options, sound_options, defaults)

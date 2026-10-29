@@ -7,7 +7,7 @@ Per-device alarms for Assist satellites, without an LLM. Alarms belong to the sa
 - Home Assistant 2026.10 or newer.
 - One or more `assist_satellite` entities with distinct devices.
 - An Assist pipeline with the built-in conversation agent. Local Wyoming faster-whisper and Kokoro work; this integration does not install or depend on them. Keep `prefer_local_intents` enabled.
-- For device-side ringing: Home Assistant Voice PE, ESPHome 2026.10 or newer, and the package below. Other hardware needs its own tested firmware adapter; this is not a universal speaker snippet.
+- For device-side ringing: either the Home Assistant Voice PE package below, or an ESPHome device exposing the EchoLocal `alarm_set` and `alarm_delete` actions.
 
 ## Install
 
@@ -15,20 +15,19 @@ In HACS, add `https://github.com/websterwh/ha-voice-alarms` as a custom **Integr
 
 Add **Voice Alarms** in Settings → Devices & services. Select all participating satellite **entities**; no device IDs or helper entities are needed. Only one integration instance is supported.
 
-Import these blueprints, create one automation from each, and select the same satellite entities:
+Each selected satellite is configured only once. Voice Alarms detects its
+capabilities automatically:
 
-- [Set alarms](https://github.com/websterwh/ha-voice-alarms/blob/master/blueprints/automation/voice_alarm_set.yaml)
-- [Stop, cancel, and list](https://github.com/websterwh/ha-voice-alarms/blob/master/blueprints/automation/voice_alarm_stop_and_query.yaml)
+- Devices with the Voice PE package receive a complete on-device schedule and
+  ring embedded audio.
+- EchoLocal devices use their native `alarm_set` and `alarm_delete` actions;
+  alarms created by this integration are labelled `Voice Alarms <id>` so it
+  never changes alarms created elsewhere.
+- Other satellites use HA's spoken announcement fallback.
 
-HACS does not automatically create these automations. There is no ring blueprint: the integration schedules alarms itself.
-
-### Modes
-
-**HA Fallback:** HA loops a spoken alarm announcement through `assist_satellite.announce`. HA, the satellite connection, STT, and TTS must be available. This mode does not use the embedded sound selector.
-
-**Local Preferred:** manually choose the satellites flashed with the Voice PE alarm package under **Local Satellites**. Those devices ring embedded audio themselves; remaining satellites use HA announcements. HA never starts an additional announcement on a local satellite, preventing double ringing. A failed device sync is an error, not a silent fallback; reconnecting retries synchronization. Setting or cancelling a local alarm requires an acknowledged sync from the device.
-
-**Max Ring Time** is 1–120 minutes, default 30. **Sound** is a shared named option discovered from each selected local device's Voice Alarms Sound select. All selected local devices must offer it. Initial options include `Timer finished`, `alarm_chime.wav`, and `alarm_bell.wav`. Flash and reconnect devices before selecting them for local operation.
+The **Max Ring Time** applies to Voice PE package devices and HA fallback.
+**Sound** applies only to Voice PE package devices. A failed device operation
+is an error, not a silent fallback; a reconnect retries package synchronization.
 
 ## Voice commands
 
@@ -44,7 +43,7 @@ HACS does not automatically create these automations. There is no ring blueprint
 
 Use numeric times such as `7 AM`, `6:30 pm`, or `19:00`; a bare `7` means 07:00. Repeating schedules use HA's local timezone, which must match `va_timezone` on each local device. One-time alarms target the next occurrence of the requested time. Past alarms are not replayed after an outage. Completed one-time records are removed automatically after a 90-second synchronization grace period.
 
-Commands must originate on a configured satellite. Dashboard conversations without a device origin, or ambiguous device mappings, are rejected. A device with its own separate alarm implementation (for example EchoLocal) may intercept overlapping commands: disable that competing alarm handler before using these blueprints.
+Commands must originate on a configured satellite. Dashboard conversations without a device origin, or ambiguous device mappings, are rejected. Voice Alarms registers native sentence triggers; no blueprints or `custom_sentences` files are needed.
 
 ## Home Assistant Voice PE firmware
 
