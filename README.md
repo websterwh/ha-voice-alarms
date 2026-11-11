@@ -1,98 +1,137 @@
-# Voice Alarms for Home Assistant
+# Voice Alarms for Home Assistant Voice PE
 
-Per-device alarms for Assist satellites, without an LLM. Alarms belong to the satellite that heard the command, not its position in a list. Up to 30 alarms per satellite; once, daily, weekdays, or weekends. No snooze or reminders.
+On-device alarms for the [Home Assistant Voice PE](https://github.com/esphome/home-assistant-voice-pe), packaged as a single ESPHome package. There is no Home Assistant custom integration, no HACS repository, no helper entities, and no cloud dependency.
 
-## Requirements
-
-- Home Assistant 2026.10 or newer.
-- One or more `assist_satellite` entities with distinct devices.
-- An Assist pipeline with the built-in conversation agent. Local Wyoming faster-whisper and Kokoro work; this integration does not install or depend on them. Keep `prefer_local_intents` enabled.
-- For device-side ringing: either the Home Assistant Voice PE package below, or an ESPHome device exposing the EchoLocal `alarm_set` and `alarm_delete` actions.
+Alarms are stored in the device's flash, evaluated against the device clock, and ring locally. Ringing uses Voice PE's own timer machinery, so the stop wake word, center button, LED ring, ducking and automatic stop all keep working, including while Home Assistant is offline.
 
 ## Install
 
-In HACS, add `https://github.com/websterwh/ha-voice-alarms` as a custom **Integration** repository. Install Voice Alarms and restart HA. Alternatively, copy `custom_components/voice_alarms` into your HA configuration's `custom_components` directory and restart.
-
-Add **Voice Alarms** in Settings → Devices & services. Select all participating satellite **entities**; no device IDs or helper entities are needed. Only one integration instance is supported.
-
-Each selected satellite is configured only once. Voice Alarms detects its
-capabilities automatically:
-
-- Devices with the Voice PE package receive a complete on-device schedule and
-  ring embedded audio.
-- EchoLocal devices use their native `alarm_set` and `alarm_delete` actions;
-  alarms created by this integration are labelled `Voice Alarms <id>` so it
-  never changes alarms created elsewhere.
-- Other satellites use HA's spoken announcement fallback.
-
-The **Max Ring Time** applies to Voice PE package devices and HA fallback.
-**Sound** applies only to Voice PE package devices. A failed device operation
-is an error, not a silent fallback; a reconnect retries package synchronization.
-
-## Voice commands
-
-- “Set alarm for 7 AM”
-- “Set daily alarm for 6:30 AM”
-- “Set weekday alarm for 8 AM”
-- “Set weekend alarm for 9 AM”
-- “Stop alarm”
-- “Cancel my alarm” — cancels the only alarm; asks for a time if there are several.
-- “Cancel the 7 AM alarm” — cancels all matching alarms at that time on this device.
-- “Cancel all alarms” — this device only.
-- “What alarms do I have”
-
-Use numeric times such as `7 AM`, `6:30 pm`, or `19:00`; a bare `7` means 07:00. Repeating schedules use HA's local timezone, which must match `va_timezone` on each local device. One-time alarms target the next occurrence of the requested time. Past alarms are not replayed after an outage. Completed one-time records are removed automatically after a 90-second synchronization grace period.
-
-Commands must originate on a configured satellite. Dashboard conversations without a device origin, or ambiguous device mappings, are rejected. Voice Alarms registers native sentence triggers; no blueprints or `custom_sentences` files are needed.
-
-## Home Assistant Voice PE firmware
-
-Remove the old alarm snippet and `voice_alarms.h` include. Retain your Wi-Fi, API encryption, device names, and custom wake-word configuration. Merge the following **package entries and substitution** into the existing YAML; do not create duplicate top-level `packages:` or `substitutions:` keys.
+Requires ESPHome 2026.10 or newer and the Voice PE package. Add this package next to your existing device configuration and set the substitutions you want:
 
 ```yaml
 substitutions:
   va_timezone: America/Los_Angeles
+  va_default_sound: Nightstand
+  va_max_ring_time: "10"
 
 packages:
   Nabu Casa.Home Assistant Voice PE: github://esphome/home-assistant-voice-pe/home-assistant-voice.yaml@d4e6fa43d6a1a7d342b7d4d403567e06516719de
-  voice_alarms: github://websterwh/ha-voice-alarms/esphome/voice_alarms_snippet.yaml@v2.1.1
+  voice_alarms: github://websterwh/ha-voice-alarms/esphome/voice_alarms.yaml@master
 ```
 
-The upstream pin identifies the Voice PE package used for validation. Don't add a second copy of that upstream package under another key. The complete alarm implementation is the [downloadable ESPHome package](https://raw.githubusercontent.com/websterwh/ha-voice-alarms/master/esphome/voice_alarms_snippet.yaml); the README imports that same file instead of maintaining another implementation. No external header, I²S pin replacements, `on_alarm_set`, or `data/` directory are needed.
+Keep exactly one copy of the upstream Voice PE package and merge these keys into your existing `substitutions:` and `packages:` mappings rather than adding duplicate top-level keys. Pin `voice_alarms` to a release tag instead of `@master` once you have one. Compile and flash the device.
 
-The package registers WAVs with `audio_file` and plays them through Voice PE's existing announcement media player and audio-file source. Downloads occur at firmware build time, not ring time. New custom sounds require adding an `audio_file` entry, selector option and playback mapping in the package, then rebuilding; arbitrary files are not automatically embedded.
+If you use a local copy of this repository, replace the second package line with `voice_alarms: !include esphome/voice_alarms.yaml`.
 
-Compile and flash, reconnect the device in HA, then configure Local Preferred and select it. Use Developer tools → Actions → **Voice Alarms: Test alarm**, passing the satellite entity. Stop with “stop alarm”, the physical center button, or the local stop wake word. Stock Voice PE timers remain separate.
+## Package options
 
-While a local alarm rings, the LED ring uses Voice PE's native timer-ringing animation. Stopping the alarm restores the normal LED state. A detected wake word (including the usual assistant wake word) dismisses the local alarm without opening a listening session; no listening light is expected. This LED behavior requires rebuilding and flashing the updated package.
+| Substitution | Default | Purpose |
+| --- | --- | --- |
+| `va_timezone` | `America/Los_Angeles` | Timezone used for alarm evaluation. Must match your local time. |
+| `va_default_sound` | `Simple Alarm` | Sound selected on a fresh device. Use any name from the list below. |
+| `va_max_ring_time` | `10` | Minutes before the alarm stops itself. Voice PE also caps ringing at 15 minutes. |
+| `va_sounds_url` | This repository's `sounds/` folder | Base URL for embedded sounds. Override to use a local or mirrored copy. |
 
-### Offline boundaries
+Changing a substitution requires rebuilding and flashing the firmware. The sound can also be changed at runtime from the **Alarm Sound** select entity and survives a reboot.
 
-Device schedules and per-alarm firing markers are persisted in flash. Once a clock has synchronized, schedules can ring while HA is offline. This does **not** provide a battery-backed RTC: after a cold boot, SNTP must obtain time before alarms can run. The default public SNTP server needs network access for synchronization; a reachable LAN NTP server can replace it. Voice setting/cancelling/listing still needs HA. Power loss before flash persistence completes can lose a recent update; don't rely on this as a safety-critical alarm clock.
+## Sounds
 
-Local ringing uses embedded sounds and a monotonic ring-duration cap. HA fallback requires the network and TTS. A sound test or compile is not proof that physical audio, microphone interaction, wake-word stopping, or flash recovery works on your particular device.
+Seventeen sounds are bundled in `sounds/` and embedded at build time:
 
-## Services and storage
+`Adrift`, `Clangy`, `Clarity`, `Countertop`, `Focus`, `Glimmer`, `Grand Tour`, `Grand Tour Season 2`, `Nightstand`, `Nimble`, `Orcas`, `Porchlight`, `Pulsar`, `Rainier`, `Simple Alarm`, `Simple Timer`, `Squared Waves`.
 
-- `voice_alarms.command`: `satellite`, `operation` (`set`, `stop`, `cancel`, `cancel_all`, `list`), optional `time`, optional `repeat`. Returns `{"response": "..."}`; request response data.
-- `voice_alarms.sync`: optional `satellite`; resends schedules to local devices.
-- `voice_alarms.test_alarm`: required `satellite`; rings until stopped or capped.
+The files are mono 22.05 kHz, 64 kbps MP3 versions of the originals, about 1.9 MB total, so the firmware stays within the Voice PE application partition. They are downloaded at build time, not at ring time.
 
-HA owns durable storage through its storage API, keyed by UUID and stable satellite entity ID. ESPHome exposes device-specific `voice_alarms_sync`, `voice_alarms_stop`, and `voice_alarms_test` native API actions. There is no `esphome.send_command` service. Do not rename satellite entity IDs with active alarms: cancel them first and update the integration and blueprints.
+## Managing alarms
 
-Changing local-device selection clears schedules from deselected connected devices before reloading. An offline device cannot be cleared remotely: its pending cleanup is persisted and retried on reconnect, and HA announcements for it are suspended to prevent double ringing. Until it reconnects, its old local schedule can still ring. Removing the integration or disabling HA does not erase device-side schedules; cancel all local alarms while connected first.
+With the device added to Home Assistant over the ESPHome integration, each action is available as an `esphome.<device_name>_<action>` service. The same actions are exposed on the native API, so any ESPHome API client can use them.
 
-## Upgrading from the prototype
+### Add an alarm
 
-The previous helper/index format and firmware were not functional. They are not migrated. Disable/delete the old set, ring, and stop automations; update the integration and import both replacement blueprints. Remove only old alarm helpers no other automation uses. Remove the old alarm C++ header/include and snippet, install the package above, and re-enter alarms. The old `tone_base_url` option is removed. No live HA configuration is changed by this repository update.
+```yaml
+action: esphome.voice_kit_alarm_set
+data:
+  at: "07:00"
+  days: weekdays
+  label: Wake up
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `at` | yes | `HH:MM` in 24-hour time. `7 AM`, `7:30 pm`, `430 PM` and a bare `7` are also accepted. |
+| `days` | no | `once`, `daily` (default), `weekdays` or `weekends`. `weekday`/`weekend` are accepted too. |
+| `label` | no | Optional name, up to 32 characters, returned by `alarm_list`. |
+
+Alarms are limited to 30 per device. Adding the same time and repeat again updates the existing alarm instead of duplicating it. A `once` alarm targets the next occurrence of that time; if you add it during its own minute, it targets tomorrow.
+
+### Delete, list, stop and test
+
+```yaml
+# Delete by time, by id, or everything at once.
+action: esphome.voice_kit_alarm_delete
+data:
+  at: "07:00"
+```
+
+```yaml
+action: esphome.voice_kit_alarm_delete
+data:
+  alarm_id: alarm-1
+```
+
+Omit both fields to delete all alarms.
+
+```yaml
+action: esphome.voice_kit_alarm_list
+response_variable: alarms
+```
+
+The response contains `count`, `accepted` and an `alarms` array of stored alarm objects.
+
+```yaml
+action: esphome.voice_kit_alarm_stop
+```
+
+```yaml
+action: esphome.voice_kit_alarm_test
+```
+
+`alarm_test` rings the selected sound without storing an alarm. The **Test Alarm** button does the same from the device page, and the **Alarm Ringing** binary sensor shows when an alarm is ringing.
+
+### Voice control
+
+The package does not register Assist sentences. To set alarms by voice, create a Home Assistant intent or automation that parses the spoken time and calls the `alarm_set` action above. Keep the parsing in Home Assistant; the device only receives a concrete `HH:MM` value.
+
+## Behaviour and limits
+
+- Alarms are persisted in flash and can ring without Home Assistant, but the device must first synchronize its clock over SNTP. There is no battery-backed RTC, so alarms cannot run before a clock sync after a cold boot.
+- Missed one-time alarms are not replayed. A one-time alarm is removed after its firing minute.
+- Ringing reuses Voice PE's `timer_ringing` state. Stopping an alarm also stops a timer ringing at the same moment, and an alarm that comes due while a timer is already ringing is marked as fired without replacing that timer's sound.
+- The stop wake word, any detected wake word, the center button, and the `alarm_stop` action all dismiss a ringing alarm. The LED ring uses Voice PE's timer-ring animation.
+- The package is intended for Voice PE, because it depends on that firmware's `timer_ringing`, `play_sound`, `external_media_player` and `audio_file` definitions. It is not a generic alarm component for other ESPHome devices.
+- Do not rely on this as a safety-critical alarm clock. Power loss before a flash write completes can lose the most recent change.
 
 ## Validation
 
-The repository includes Python regression tests against Home Assistant, blueprint substitution/action-schema and Hassil phrase checks, execution tests for the actual firmware C++ lambdas, and a full Voice PE build fixture at `tests/voice_pe_validation.yaml`. The fixture uses local copies of the same WAVs so firmware can be validated before publishing a release. Run HA/Python tests and ESPHome in separate environments: installing both together can force an obsolete ESPHome version through dependency resolution.
+```bash
+python -m pytest tests
+```
 
-The Python suite requires Home Assistant 2026.10.2, pytest, pytest-asyncio, PyYAML and Hassil 3.12.1 under Python 3.14. For `tests/test_firmware.py`, install `g++`, clone ArduinoJson tag `v7.4.3`, and set `ARDUINOJSON_INCLUDE` to that checkout's `src` directory before running `python -m pytest tests`. Validate/build the full device separately with ESPHome 2026.10.0: `esphome config tests/voice_pe_validation.yaml` and `esphome compile tests/voice_pe_validation.yaml`. Neither command flashes a device.
+`tests/test_package.py` checks the package structure, the sound bundle and the option-to-file mapping. `tests/test_alarms.py` compiles the actual scheduler, add, delete and list lambdas for the host with ArduinoJson and exercises them with a stub clock. Set `ARDUINOJSON_INCLUDE` to the `src` directory of an ArduinoJson 7 checkout before running it, for example:
 
-Physical-device acceptance still requires setting a near-term alarm, confirming it rings only on the source device, stopping it, checking a repeating alarm, and checking an already-synchronized device with HA unavailable. Firmware is never automatically flashed by this integration.
+```bash
+git clone --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson.git /tmp/ArduinoJson
+ARDUINOJSON_INCLUDE=/tmp/ArduinoJson/src python -m pytest tests
+```
+
+To validate the full firmware configuration, use ESPHome in a separate environment from the test dependencies:
+
+```bash
+esphome config tests/voice_pe_validation.yaml
+esphome compile tests/voice_pe_validation.yaml
+```
+
+The fixture uses the local `sounds/` directory instead of downloading the published files. Neither command flashes a device. Physical audio, microphone interaction, wake-word stopping and flash recovery still need a check on real hardware.
 
 ## License
 

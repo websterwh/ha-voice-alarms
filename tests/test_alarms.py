@@ -1,379 +1,225 @@
-"""Regression tests against real Home Assistant types, without a live installation."""
+"""Execute the package's real alarm lambdas with ArduinoJson and a stub clock.
 
-import asyncio
-import json
-from datetime import datetime, timedelta
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
-from zoneinfo import ZoneInfo
+Set ARDUINOJSON_INCLUDE to ArduinoJson 7's src directory to run this test.
+"""
+
+import os
+import subprocess
+from pathlib import Path
 
 import pytest
-import pytest_asyncio
-from homeassistant.core import HomeAssistant, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import entity_registry as er
+import yaml
 
-from custom_components.voice_alarms import (
-    AlarmCoordinator,
-    async_setup_entry,
-    async_unload_entry,
-    async_update_options,
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class FirmwareLoader(yaml.SafeLoader):
+    pass
+
+
+FirmwareLoader.add_multi_constructor(
+    "!", lambda loader, tag, node: loader.construct_scalar(node)
 )
-from custom_components.voice_alarms.models import Alarm, new_alarm, parse_time
 
-ZONE = ZoneInfo("America/Los_Angeles")
-NOW = datetime(2026, 10, 23, 7, 0, 12, tzinfo=ZONE)
-BED = "assist_satellite.bedroom"
-DESK = "assist_satellite.desk"
+PREAMBLE = r"""
+#include <ArduinoJson.h>
+#include <array>
+#include <cassert>
+#include <cstdlib>
+#include <ctime>
+#include <string>
+
+#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(...) ((void)0)
+#define ESP_LOGE(...) ((void)0)
+#define ESP_LOGD(...) ((void)0)
+#define id(x) x
+
+struct ESPTime {
+  int year, month, day_of_month, hour, minute, second, day_of_week;
+  time_t timestamp;
+  bool is_valid() const { return year >= 2026; }
+};
+struct Clock {
+  ESPTime value{};
+  ESPTime now() const { return value; }
+} va_clock;
+struct Switch {
+  bool state = false;
+  void turn_on() { state = true; }
+  void turn_off() { state = false; }
+} timer_ringing;
+struct Script {
+  int count = 0;
+  void execute() { ++count; }
+} va_ring_alarm;
+
+std::array<char, 4096> va_alarms_json{};
+std::array<char, 2048> va_fired_json{};
+
+JsonDocument response;
+JsonObject root = response.to<JsonObject>();
+
+void set_now(int year, int month, int day, int hour, int minute, int second) {
+  std::tm value{};
+  value.tm_year = year - 1900;
+  value.tm_mon = month - 1;
+  value.tm_mday = day;
+  value.tm_hour = hour;
+  value.tm_min = minute;
+  value.tm_sec = second;
+  value.tm_isdst = -1;
+  std::time_t stamp = std::mktime(&value);
+  va_clock.value = {year, month, day, hour, minute, second, value.tm_wday + 1, stamp};
+}
+
+void reset_state() {
+  va_alarms_json.fill(0);
+  va_fired_json.fill(0);
+  va_ring_alarm.count = 0;
+  timer_ringing.state = false;
+}
+
+size_t alarm_count() {
+  JsonDocument doc;
+  if (deserializeJson(doc, va_alarms_json.data()) || !doc["alarms"].is<JsonArray>()) return 0;
+  return doc["alarms"].as<JsonArray>().size();
+}
+
+void alarm_set(const std::string &at, const std::string &days, const std::string &label) {
+"""
+
+EPILOGUE = r"""
+}
+
+int main() {
+  setenv("TZ", "America/Los_Angeles", 1);
+  tzset();
+  reset_state();
+
+  // Add, normalise and de-duplicate alarms.
+  set_now(2026, 10, 23, 6, 0, 0);  // Friday
+  alarm_set("7 AM", "", "");
+  assert(alarm_count() == 1);
+  alarm_set("07:00", "daily", "Wake");
+  assert(alarm_count() == 1);
+  alarm_set("6:30", "weekdays", "");
+  assert(alarm_count() == 2);
+  alarm_set("25:00", "daily", "");
+  alarm_set("07:00", "sometimes", "");
+  alarm_set("07:60", "daily", "");
+  assert(alarm_count() == 2);
+
+  // A daily alarm rings once in its minute, even across repeated ticks.
+  set_now(2026, 10, 23, 7, 0, 5);
+  schedule_tick();
+  assert(va_ring_alarm.count == 1);
+  schedule_tick();
+  assert(va_ring_alarm.count == 1);
+
+  // Weekday alarms stay quiet at the weekend, daily alarms still ring.
+  set_now(2026, 10, 24, 7, 0, 5);  // Saturday
+  schedule_tick();
+  assert(va_ring_alarm.count == 2);
+
+  // Weekday alarm rings on Friday at 06:30.
+  set_now(2026, 10, 23, 6, 30, 5);
+  schedule_tick();
+  assert(va_ring_alarm.count == 3);
+
+  // Weekend alarm rings on Saturday and not on Friday.
+  set_now(2026, 10, 24, 8, 0, 0);
+  alarm_set("08:00", "weekends", "");
+  schedule_tick();
+  assert(va_ring_alarm.count == 4);
+  set_now(2026, 10, 23, 8, 0, 0);
+  schedule_tick();
+  assert(va_ring_alarm.count == 4);
+
+  // One-time alarm: schedules the next occurrence, then removes itself.
+  reset_state();
+  set_now(2026, 10, 23, 6, 0, 0);
+  alarm_set("07:00", "once", "");
+  assert(alarm_count() == 1);
+  schedule_tick();
+  assert(va_ring_alarm.count == 0);
+  set_now(2026, 10, 23, 7, 0, 10);
+  schedule_tick();
+  assert(va_ring_alarm.count == 1);
+  assert(alarm_count() == 1);
+  set_now(2026, 10, 23, 7, 1, 0);
+  schedule_tick();
+  assert(alarm_count() == 0);
+
+  // A one-time alarm requested inside its own minute targets tomorrow.
+  reset_state();
+  set_now(2026, 10, 25, 7, 0, 20);
+  alarm_set("07:00", "once", "");
+  schedule_tick();
+  assert(va_ring_alarm.count == 0);
+  set_now(2026, 10, 26, 7, 0, 10);
+  schedule_tick();
+  assert(va_ring_alarm.count == 1);
+
+  // Delete by time, by id and everything.
+  reset_state();
+  set_now(2026, 10, 27, 6, 0, 0);
+  alarm_set("06:00", "daily", "");
+  alarm_set("07:00", "daily", "");
+  alarm_delete("", "07:00");
+  assert(alarm_count() == 1);
+  alarm_delete("alarm-999", "");
+  assert(alarm_count() == 1);
+  alarm_set("09:00", "weekdays", "Work");
+  alarm_list();
+  assert(response["count"] == 2);
+  assert(response["alarms"].as<JsonArray>().size() == 2);
+  alarm_delete("", "");
+  assert(alarm_count() == 0);
+
+  // A clock that has not synchronised cannot accept alarms.
+  reset_state();
+  va_clock.value = ESPTime{};
+  alarm_set("07:00", "daily", "");
+  assert(alarm_count() == 0);
+}
+"""
 
 
-@pytest_asyncio.fixture
-async def coordinator(tmp_path):
-    hass = HomeAssistant(str(tmp_path))
-    entry = SimpleNamespace(
-        entry_id="test",
-        data={"satellite_devices": [BED, DESK], "max_ring_time": 30},
-        options={},
+def test_alarm_lambdas_compile_and_run(tmp_path):
+    include = os.environ.get("ARDUINOJSON_INCLUDE")
+    if not include or not (Path(include) / "ArduinoJson.h").is_file():
+        pytest.skip("Set ARDUINOJSON_INCLUDE to ArduinoJson 7's src directory")
+
+    config = yaml.load(
+        (ROOT / "esphome" / "voice_alarms.yaml").read_text(), Loader=FirmwareLoader
     )
-    result = AlarmCoordinator(hass, entry)
-    result.async_save = AsyncMock()
-    return result
+    actions = {item["action"]: item for item in config["api"]["actions"]}
+    alarm_set = actions["alarm_set"]["then"][0]["lambda"]
+    alarm_delete = actions["alarm_delete"]["then"][0]["lambda"]
+    alarm_list = actions["alarm_list"]["then"][0]["lambda"]
+    schedule = config["interval"][0]["then"][0]["lambda"]
 
-
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("7 AM", (7, 0)),
-        ("12 am", (0, 0)),
-        ("12 PM", (12, 0)),
-        ("6:30 pm", (18, 30)),
-        ("23:59", (23, 59)),
-        ("7", (7, 0)),
-    ],
-)
-def test_parse_time(text, expected):
-    assert parse_time(text) == expected
-
-
-@pytest.mark.parametrize(
-    "text", ["", "24:00", "13 PM", "7:60", "-1:00", "tomorrow", "7 AM garbage"]
-)
-def test_invalid_times_fail(text):
-    with pytest.raises(ValueError):
-        parse_time(text)
-
-
-def test_once_rolls_forward_and_round_trips():
-    alarm = new_alarm(BED, "7 AM", "once", NOW)
-    assert alarm.once_at == NOW.replace(day=24, second=0).timestamp()
-    assert Alarm.from_dict(alarm.to_dict()) == alarm
-    assert not alarm.due(NOW)
-    assert alarm.due(NOW.replace(day=24))
-
-
-@pytest.mark.parametrize(
-    "repeat,day,expected",
-    [
-        ("daily", 24, True),
-        ("weekdays", 23, True),
-        ("weekdays", 24, False),
-        ("weekends", 24, True),
-        ("weekends", 23, False),
-    ],
-)
-def test_repeat_day_boundaries(repeat, day, expected):
-    alarm = new_alarm(BED, "7 AM", repeat, NOW - timedelta(hours=1))
-    assert alarm.due(NOW.replace(day=day)) is expected
-    assert not alarm.due(NOW.replace(day=day, minute=1))
-    alarm.last_fired = NOW.replace(day=day).strftime("%Y-%m-%dT%H:%M")
-    assert not alarm.due(NOW.replace(day=day))
-
-
-@pytest.mark.asyncio
-async def test_set_and_cancel_are_satellite_isolated(coordinator):
-    with patch("custom_components.voice_alarms.dt_util.now", return_value=NOW):
-        for satellite in (BED, DESK):
-            result = await coordinator.async_command(
-                {"satellite": satellite, "operation": "set", "time": "8 AM"}
-            )
-            assert result["response"] == "Alarm set for 08:00."
-        await coordinator.async_command({"satellite": BED, "operation": "cancel_all"})
-    assert [alarm.satellite for alarm in coordinator.alarms] == [DESK]
-
-
-@pytest.mark.asyncio
-async def test_duplicate_and_ambiguous_cancel_do_not_mutate(coordinator):
-    with patch("custom_components.voice_alarms.dt_util.now", return_value=NOW):
-        for time in ("8 AM", "9 AM"):
-            await coordinator.async_command(
-                {"satellite": BED, "operation": "set", "time": time}
-            )
-        result = await coordinator.async_command(
-            {"satellite": BED, "operation": "set", "time": "8 AM"}
-        )
-        assert "already" in result["response"]
-        result = await coordinator.async_command(
-            {"satellite": BED, "operation": "cancel"}
-        )
-        assert "which" in result["response"]
-    assert len(coordinator.alarms) == 2
-
-
-@pytest.mark.asyncio
-async def test_failed_local_sync_rolls_back_set(coordinator):
-    coordinator.local = {BED}
-    coordinator.async_native = AsyncMock(side_effect=HomeAssistantError("offline"))
-    with (
-        patch("custom_components.voice_alarms.dt_util.now", return_value=NOW),
-        pytest.raises(HomeAssistantError),
-    ):
-        await coordinator.async_command(
-            {"satellite": BED, "operation": "set", "time": "8 AM"}
-        )
-    assert not coordinator.alarms
-    assert coordinator.async_save.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_local_payload_and_retry_after_failure(coordinator):
-    coordinator.local = {BED}
-    coordinator.alarms = [new_alarm(sat, "8 AM", "once", NOW) for sat in (BED, DESK)]
-    coordinator.async_native = AsyncMock(
-        side_effect=[HomeAssistantError("offline"), None]
-    )
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_sync(BED)
-    assert BED not in coordinator.last_payload
-    await coordinator.async_sync(BED)
-    payload = json.loads(coordinator.async_native.call_args.args[2]["payload"])
-    assert len(payload["alarms"]) == 1
-    assert payload["alarms"][0]["id"] == coordinator.alarms[0].id
-    assert "last_fired" not in payload["alarms"][0]
-    assert payload["sound"] == "Timer finished"
-    assert payload["max_ring_time"] == 30
-    await coordinator.async_sync(BED)
-    assert coordinator.async_native.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_due_dispatch_once_and_local_never_double_rings(coordinator):
-    coordinator.local = {BED}
-    coordinator.async_native = AsyncMock()
-    from unittest.mock import Mock
-
-    coordinator.start_ringing = Mock()
-    coordinator.alarms = [
-        new_alarm(sat, "7 AM", "once", NOW - timedelta(hours=1)) for sat in (BED, DESK)
-    ]
-    with patch("custom_components.voice_alarms.dt_util.now", return_value=NOW):
-        await coordinator.async_tick(NOW)
-        await coordinator.async_tick(NOW)
-    coordinator.start_ringing.assert_called_once_with(DESK)
-    assert len(coordinator.alarms) == 2
-    with patch(
-        "custom_components.voice_alarms.dt_util.now",
-        return_value=NOW + timedelta(seconds=90),
-    ):
-        await coordinator.async_tick(NOW)
-    assert not coordinator.alarms
-    assert (
-        json.loads(coordinator.async_native.call_args.args[2]["payload"])["alarms"]
-        == []
+    source = (
+        PREAMBLE
+        + alarm_set
+        + "\n}\n\nvoid alarm_delete(const std::string &alarm_id, const std::string &at) {\n"
+        + alarm_delete
+        + "\n}\n\nvoid alarm_list() {\n"
+        + alarm_list
+        + "\n}\n\nvoid schedule_tick() {\n"
+        + schedule
+        + EPILOGUE
     )
 
-
-@pytest.mark.asyncio
-async def test_options_override_initial_data(tmp_path):
-    entry = SimpleNamespace(
-        entry_id="test",
-        data={"sound": "Timer finished", "max_ring_time": 30},
-        options={"sound": "alarm_bell.wav", "max_ring_time": 2},
+    cpp = tmp_path / "alarm_test.cpp"
+    cpp.write_text(source)
+    binary = tmp_path / "alarm_test"
+    build = subprocess.run(
+        ["g++", "-std=c++20", "-I", include, str(cpp), "-o", str(binary)],
+        capture_output=True,
+        text=True,
     )
-    coordinator = AlarmCoordinator(HomeAssistant(str(tmp_path)), entry)
-    assert coordinator.sound == "alarm_bell.wav"
-    assert coordinator.max_minutes == 2
-
-
-@pytest.mark.asyncio
-async def test_native_service_uses_registry_and_real_node_name(coordinator):
-    entry = SimpleNamespace(
-        domain="esphome",
-        runtime_data=SimpleNamespace(device_info=SimpleNamespace(name="real-node")),
-    )
-    registered = SimpleNamespace(config_entry_id="esphome_entry")
-    coordinator.hass.config_entries = SimpleNamespace(async_get_entry=lambda key: entry)
-    with patch.object(
-        er,
-        "async_get",
-        return_value=SimpleNamespace(async_get=lambda entity: registered),
-    ):
-        with pytest.raises(ServiceValidationError):
-            coordinator.native_name(BED, "voice_alarms_sync")
-        coordinator.hass.services.async_register(
-            "esphome", "real_node_voice_alarms_sync", AsyncMock()
-        )
-        assert (
-            coordinator.native_name(BED, "voice_alarms_sync")
-            == "real_node_voice_alarms_sync"
-        )
-
-
-@pytest.mark.asyncio
-async def test_echolocal_service_capability_sets_and_cancels_its_own_alarm(coordinator):
-    entry = SimpleNamespace(
-        domain="esphome",
-        runtime_data=SimpleNamespace(device_info=SimpleNamespace(name="bedroom-echo")),
-    )
-    registered = SimpleNamespace(config_entry_id="esphome_entry")
-    coordinator.hass.config_entries = SimpleNamespace(async_get_entry=lambda key: entry)
-    set_handler = AsyncMock()
-    delete_handler = AsyncMock()
-    coordinator.hass.services.async_register(
-        "esphome", "bedroom_echo_alarm_set", set_handler
-    )
-    coordinator.hass.services.async_register(
-        "esphome", "bedroom_echo_alarm_delete", delete_handler
-    )
-    with (
-        patch.object(
-            er,
-            "async_get",
-            return_value=SimpleNamespace(async_get=lambda entity: registered),
-        ),
-        patch("custom_components.voice_alarms.dt_util.now", return_value=NOW),
-    ):
-        result = await coordinator.async_command(
-            {"satellite": BED, "operation": "set", "time": "8 AM", "repeat": "daily"}
-        )
-        assert result == {"response": "Alarm set for 08:00 daily."}
-        set_data = set_handler.call_args.args[0].data
-        assert set_data["time"] == "08:00"
-        assert set_data["days"] == "daily"
-        assert set_data["label"].startswith("Voice Alarms ")
-
-        result = await coordinator.async_command(
-            {"satellite": BED, "operation": "cancel", "time": "8 AM"}
-        )
-        assert result == {"response": "Alarm cancelled."}
-        assert delete_handler.call_args.args[0].data == {
-            "time": "08:00",
-            "label": set_data["label"],
-        }
-
-
-@pytest.mark.asyncio
-async def test_rejects_unconfigured_satellite(coordinator):
-    with pytest.raises(ServiceValidationError):
-        await coordinator.async_command(
-            {"satellite": "assist_satellite.stranger", "operation": "list"}
-        )
-
-
-@pytest.mark.asyncio
-async def test_sync_requests_response_from_native_action(coordinator):
-    handler = AsyncMock(return_value={"synced": True})
-    coordinator.hass.services.async_register(
-        "esphome",
-        "real_node_voice_alarms_sync",
-        handler,
-        supports_response=SupportsResponse.ONLY,
-    )
-    with patch.object(
-        coordinator, "native_name", return_value="real_node_voice_alarms_sync"
-    ):
-        await coordinator.async_native(BED, "voice_alarms_sync", {"payload": "{}"})
-    assert handler.call_args.args[0].data == {"payload": "{}"}
-    assert handler.call_args.args[0].return_response
-
-
-@pytest.mark.asyncio
-async def test_ring_timeout_cleans_up(coordinator):
-    coordinator.max_minutes = 0.0001
-    coordinator.async_stop_media = AsyncMock()
-    coordinator.hass.services.async_register(
-        "assist_satellite", "announce", AsyncMock()
-    )
-    task = asyncio.create_task(coordinator.async_ring(BED))
-    coordinator.ringing[BED] = task
-    await asyncio.wait_for(task, 1)
-    assert BED not in coordinator.ringing
-    coordinator.async_stop_media.assert_awaited_once_with(BED)
-
-
-@pytest.mark.asyncio
-async def test_real_storage_survives_coordinator_recreation(tmp_path):
-    hass = HomeAssistant(str(tmp_path))
-    entry = SimpleNamespace(
-        entry_id="persist", data={"satellite_devices": [BED]}, options={}
-    )
-    first = AlarmCoordinator(hass, entry)
-    first.alarms = [new_alarm(BED, "8 AM", "daily", NOW)]
-    first.alarms[0].last_fired = NOW.strftime("%Y-%m-%dT%H:%M")
-    await first.async_save()
-    second = AlarmCoordinator(hass, entry)
-    await second.async_load()
-    assert second.alarms == first.alarms
-
-
-@pytest.mark.asyncio
-async def test_entry_setup_and_unload_without_nonexistent_platform(tmp_path):
-    hass = HomeAssistant(str(tmp_path))
-    hass.config_entries = SimpleNamespace(
-        async_forward_entry_setups=AsyncMock(),
-        async_unload_platforms=AsyncMock(return_value=True),
-    )
-    cleanups, tasks = [], []
-
-    def background(hass, coro, name):
-        task = asyncio.create_task(coro, name=name)
-        tasks.append(task)
-        return task
-
-    entry = SimpleNamespace(
-        entry_id="setup",
-        data={"satellite_devices": [BED]},
-        options={},
-        async_on_unload=cleanups.append,
-        add_update_listener=lambda listener: lambda: None,
-        async_create_background_task=background,
-    )
-    assert await async_setup_entry(hass, entry)
-    await asyncio.gather(*tasks)
-    assert hass.services.has_service("voice_alarms", "command")
-    response = await hass.services.async_call(
-        "voice_alarms",
-        "command",
-        {"satellite": BED, "operation": "list"},
-        blocking=True,
-        return_response=True,
-    )
-    assert response == {"response": "No alarms are set."}
-    for cleanup in cleanups:
-        cleanup()
-    assert await async_unload_entry(hass, entry)
-    assert not hass.services.has_service("voice_alarms", "command")
-
-
-@pytest.mark.asyncio
-async def test_offline_local_removal_reloads_and_defers_cleanup(coordinator):
-    coordinator.local = {BED}
-    coordinator.async_native = AsyncMock(side_effect=HomeAssistantError("offline"))
-    coordinator.entry.options = {"satellite_devices": [DESK]}
-    coordinator.hass.data["voice_alarms"] = {"test": coordinator}
-    reload = AsyncMock()
-    coordinator.hass.config_entries = SimpleNamespace(async_reload=reload)
-    await async_update_options(coordinator.hass, coordinator.entry)
-    reload.assert_awaited_once_with("test")
-    assert coordinator.pending_clear == {BED}
-    coordinator.async_native = AsyncMock()
-    coordinator.local = set()
-    await coordinator.async_sync_pending()
-    assert not coordinator.pending_clear
-    assert coordinator.async_native.call_args_list[0].args[1] == "voice_alarms_sync"
-    assert (
-        json.loads(coordinator.async_native.call_args_list[0].args[2]["payload"])[
-            "alarms"
-        ]
-        == []
-    )
-    assert coordinator.async_native.call_args_list[1].args[1] == "voice_alarms_stop"
+    assert build.returncode == 0, build.stderr
+    run = subprocess.run([str(binary)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr

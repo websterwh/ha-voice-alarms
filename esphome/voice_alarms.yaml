@@ -1,0 +1,555 @@
+# Voice Alarms for Home Assistant Voice PE
+#
+# On-device alarm scheduling with locally persisted alarms and embedded sounds.
+# No Home Assistant custom integration is required. Alarms are managed through
+# ESPHome native API actions (also exposed as esphome.<node>_alarm_* services in
+# Home Assistant) and ring through Voice PE's own timer machinery so the stop
+# wake word, center button, ducking and LED ring keep working.
+#
+# Package options (override in your device substitutions):
+#   va_timezone:     timezone used to evaluate alarm times
+#   va_default_sound: sound used until changed on the Alarm Sound select entity
+#   va_max_ring_time: minutes before an alarm stops itself (Voice PE caps at 15)
+#   va_sounds_url:   base URL for the bundled sound files
+
+substitutions:
+  va_timezone: America/Los_Angeles
+  va_default_sound: Simple Alarm
+  va_max_ring_time: "10"
+  va_sounds_url: https://raw.githubusercontent.com/websterwh/ha-voice-alarms/master/sounds
+
+globals:
+  # Persisted alarm table. Shape:
+  # {"alarms":[{"id":"alarm-1","hour":7,"minute":0,"repeat":"daily",
+  #             "once_at":0,"label":"Wake up"}]}
+  - id: va_alarms_json
+    type: std::array<char,4096>
+    restore_value: true
+    initial_value: 'std::array<char,4096>{}'
+  # Last local date each alarm fired, so a minute is never rung twice.
+  - id: va_fired_json
+    type: std::array<char,2048>
+    restore_value: true
+    initial_value: 'std::array<char,2048>{}'
+
+time:
+  - platform: sntp
+    id: va_clock
+    timezone: ${va_timezone}
+
+audio_file:
+  - id: va_sound_adrift
+    file: ${va_sounds_url}/adrift.mp3
+  - id: va_sound_clangy
+    file: ${va_sounds_url}/clangy.mp3
+  - id: va_sound_clarity
+    file: ${va_sounds_url}/clarity.mp3
+  - id: va_sound_countertop
+    file: ${va_sounds_url}/countertop.mp3
+  - id: va_sound_focus
+    file: ${va_sounds_url}/focus.mp3
+  - id: va_sound_glimmer
+    file: ${va_sounds_url}/glimmer.mp3
+  - id: va_sound_grand_tour
+    file: ${va_sounds_url}/grand_tour.mp3
+  - id: va_sound_grand_tour_season_2
+    file: ${va_sounds_url}/grand_tour_season_2.mp3
+  - id: va_sound_nightstand
+    file: ${va_sounds_url}/nightstand.mp3
+  - id: va_sound_nimble
+    file: ${va_sounds_url}/nimble.mp3
+  - id: va_sound_orcas
+    file: ${va_sounds_url}/orcas.mp3
+  - id: va_sound_porchlight
+    file: ${va_sounds_url}/porchlight.mp3
+  - id: va_sound_pulsar
+    file: ${va_sounds_url}/pulsar.mp3
+  - id: va_sound_rainier
+    file: ${va_sounds_url}/rainier.mp3
+  - id: va_sound_simple_alarm
+    file: ${va_sounds_url}/simple_alarm.mp3
+  - id: va_sound_simple_timer
+    file: ${va_sounds_url}/simple_timer.mp3
+  - id: va_sound_squared_waves
+    file: ${va_sounds_url}/squared_waves.mp3
+
+select:
+  - platform: template
+    id: voice_alarms_sound
+    name: Alarm Sound
+    icon: mdi:music-note
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    initial_option: ${va_default_sound}
+    options:
+      - Adrift
+      - Clangy
+      - Clarity
+      - Countertop
+      - Focus
+      - Glimmer
+      - Grand Tour
+      - Grand Tour Season 2
+      - Nightstand
+      - Nimble
+      - Orcas
+      - Porchlight
+      - Pulsar
+      - Rainier
+      - Simple Alarm
+      - Simple Timer
+      - Squared Waves
+
+binary_sensor:
+  - platform: template
+    id: va_alarm_ringing
+    name: Alarm Ringing
+    entity_category: diagnostic
+    lambda: return id(timer_ringing).state;
+
+button:
+  - platform: template
+    id: va_test_alarm_button
+    name: Test Alarm
+    icon: mdi:alarm
+    entity_category: diagnostic
+    on_press:
+      - script.execute: va_ring_alarm
+
+script:
+  # Play the selected sound as a Voice PE announcement. The announcement
+  # pipeline's repeat mode, enabled by timer_ringing, keeps it looping.
+  - id: va_play_alarm_sound
+    mode: restart
+    then:
+      - lambda: |-
+          const char *key = "va_sound_simple_alarm";
+          switch (id(voice_alarms_sound).active_index().value_or(14)) {
+            case 0: key = "va_sound_adrift"; break;
+            case 1: key = "va_sound_clangy"; break;
+            case 2: key = "va_sound_clarity"; break;
+            case 3: key = "va_sound_countertop"; break;
+            case 4: key = "va_sound_focus"; break;
+            case 5: key = "va_sound_glimmer"; break;
+            case 6: key = "va_sound_grand_tour"; break;
+            case 7: key = "va_sound_grand_tour_season_2"; break;
+            case 8: key = "va_sound_nightstand"; break;
+            case 9: key = "va_sound_nimble"; break;
+            case 10: key = "va_sound_orcas"; break;
+            case 11: key = "va_sound_porchlight"; break;
+            case 12: key = "va_sound_pulsar"; break;
+            case 13: key = "va_sound_rainier"; break;
+            case 14: key = "va_sound_simple_alarm"; break;
+            case 15: key = "va_sound_simple_timer"; break;
+            case 16: key = "va_sound_squared_waves"; break;
+          }
+          id(play_sound).execute(true, key);
+
+  # Enter Voice PE's ringing state, then replace its timer chime with the
+  # selected alarm sound. The second play wins the race against ring_timer.
+  - id: va_ring_alarm
+    mode: restart
+    then:
+      - if:
+          condition:
+            switch.is_off: timer_ringing
+          then:
+            - switch.turn_on: timer_ringing
+            - delay: 250ms
+            - script.execute: va_play_alarm_sound
+            - delay: 2s
+            - if:
+                condition:
+                  switch.is_on: timer_ringing
+                then:
+                  - script.execute: va_play_alarm_sound
+            - script.execute: va_alarm_timeout
+
+  - id: va_alarm_timeout
+    mode: restart
+    then:
+      - delay: ${va_max_ring_time}min
+      - if:
+          condition:
+            switch.is_on: timer_ringing
+          then:
+            - switch.turn_off: timer_ringing
+
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          const auto now = id(va_clock).now();
+          if (!now.is_valid() || id(va_alarms_json)[0] == 0) return;
+
+          JsonDocument doc;
+          if (deserializeJson(doc, id(va_alarms_json).data()) || !doc.is<JsonObject>()) return;
+          JsonArray alarms = doc["alarms"].as<JsonArray>();
+          if (alarms.isNull()) return;
+
+          JsonDocument fired_doc;
+          if (deserializeJson(fired_doc, id(va_fired_json).data()) || !fired_doc.is<JsonObject>())
+            fired_doc.to<JsonObject>();
+
+          char date[16];
+          snprintf(date, sizeof(date), "%04d-%02d-%02d", now.year, now.month, now.day_of_month);
+          const time_t current_minute = now.timestamp / 60;
+          bool ring = false;
+          bool alarms_changed = false;
+          bool fired_changed = false;
+
+          for (size_t i = 0; i < alarms.size();) {
+            JsonObject alarm = alarms[i].as<JsonObject>();
+            const std::string alarm_id = alarm["id"] | "";
+            const std::string repeat = alarm["repeat"] | "daily";
+            const int hour = alarm["hour"] | -1;
+            const int minute = alarm["minute"] | -1;
+            bool due = false;
+
+            if (repeat == "once") {
+              const double once_at = alarm["once_at"] | 0.0;
+              const time_t once_minute = static_cast<time_t>(once_at) / 60;
+              if (once_at <= 0 || once_minute < current_minute) {
+                if (!alarm_id.empty() && fired_doc[alarm_id].is<const char *>()) {
+                  fired_doc.remove(alarm_id);
+                  fired_changed = true;
+                }
+                alarms.remove(i);
+                alarms_changed = true;
+                continue;
+              }
+              due = once_minute == current_minute;
+            } else {
+              if (repeat == "daily") due = true;
+              else if (repeat == "weekdays") due = now.day_of_week >= 2 && now.day_of_week <= 6;
+              else if (repeat == "weekends") due = now.day_of_week == 1 || now.day_of_week == 7;
+              due = due && hour == now.hour && minute == now.minute;
+            }
+
+            if (due && alarm_id.size() &&
+                std::string(fired_doc[alarm_id] | "") != std::string(date)) {
+              fired_doc[alarm_id] = date;
+              fired_changed = true;
+              ring = true;
+              ESP_LOGI("voice_alarms", "Alarm %s due at %02d:%02d", alarm_id.c_str(), hour, minute);
+            }
+            ++i;
+          }
+
+          if (alarms_changed) {
+            std::string encoded;
+            serializeJson(doc, encoded);
+            if (encoded.size() < id(va_alarms_json).size()) {
+              id(va_alarms_json).fill(0);
+              for (size_t i = 0; i < encoded.size(); ++i) id(va_alarms_json)[i] = encoded[i];
+            } else {
+              ESP_LOGE("voice_alarms", "Alarm table exceeds persistence capacity");
+            }
+          }
+          if (fired_changed) {
+            std::string encoded;
+            serializeJson(fired_doc, encoded);
+            if (encoded.size() < id(va_fired_json).size()) {
+              id(va_fired_json).fill(0);
+              for (size_t i = 0; i < encoded.size(); ++i) id(va_fired_json)[i] = encoded[i];
+            } else {
+              ESP_LOGE("voice_alarms", "Fired markers exceed persistence capacity");
+            }
+          }
+          if (ring) id(va_ring_alarm).execute();
+
+api:
+  actions:
+    - action: alarm_set
+      variables:
+        at: string
+        days: string
+        label: string
+      then:
+        - lambda: |-
+            const auto now = id(va_clock).now();
+            if (!now.is_valid()) {
+              ESP_LOGE("voice_alarms", "Cannot set an alarm before the clock is synchronized");
+              return;
+            }
+
+            std::string text = at;
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.erase(text.begin());
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.pop_back();
+            std::string upper = text;
+            for (size_t i = 0; i < upper.size(); ++i)
+              if (upper[i] >= 'a' && upper[i] <= 'z') upper[i] = upper[i] - 'a' + 'A';
+            bool am = false;
+            bool pm = false;
+            if (upper.size() >= 2 && upper.substr(upper.size() - 2) == "AM") {
+              am = true;
+              text = text.substr(0, text.size() - 2);
+            } else if (upper.size() >= 2 && upper.substr(upper.size() - 2) == "PM") {
+              pm = true;
+              text = text.substr(0, text.size() - 2);
+            }
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.erase(text.begin());
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.pop_back();
+
+            const size_t colon = text.find(':');
+            const std::string hour_text = colon == std::string::npos ? text : text.substr(0, colon);
+            const std::string minute_text = colon == std::string::npos ? "0" : text.substr(colon + 1);
+            auto parse_number = [](const std::string &value, int &result) -> bool {
+              if (value.empty()) return false;
+              int number = 0;
+              for (size_t i = 0; i < value.size(); ++i) {
+                if (value[i] < '0' || value[i] > '9') return false;
+                number = number * 10 + (value[i] - '0');
+                if (number > 1000) return false;
+              }
+              result = number;
+              return true;
+            };
+            int hour = 0;
+            int minute = 0;
+            if (!parse_number(hour_text, hour) || !parse_number(minute_text, minute)) {
+              ESP_LOGE("voice_alarms", "Invalid alarm time '%s'", at.c_str());
+              return;
+            }
+            if (am || pm) {
+              if (hour < 1 || hour > 12) {
+                ESP_LOGE("voice_alarms", "Invalid 12-hour alarm time '%s'", at.c_str());
+                return;
+              }
+              if (am && hour == 12) hour = 0;
+              else if (pm && hour != 12) hour += 12;
+            }
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+              ESP_LOGE("voice_alarms", "Alarm time out of range '%s'", at.c_str());
+              return;
+            }
+
+            std::string mode = days;
+            for (size_t i = 0; i < mode.size(); ++i)
+              if (mode[i] >= 'A' && mode[i] <= 'Z') mode[i] = mode[i] - 'A' + 'a';
+            if (mode.empty()) mode = "daily";
+            if (mode == "weekday") mode = "weekdays";
+            if (mode == "weekend") mode = "weekends";
+            if (mode != "once" && mode != "daily" && mode != "weekdays" && mode != "weekends") {
+              ESP_LOGE("voice_alarms", "Invalid alarm repeat '%s'", days.c_str());
+              return;
+            }
+
+            double once_at = 0;
+            if (mode == "once") {
+              const time_t midnight =
+                  now.timestamp - (now.hour * 3600 + now.minute * 60 + now.second);
+              time_t target = midnight + hour * 3600 + minute * 60;
+              if (target <= now.timestamp) target += 86400;
+              once_at = static_cast<double>(target);
+            }
+
+            JsonDocument doc;
+            if (deserializeJson(doc, id(va_alarms_json).data()) || !doc.is<JsonObject>()) {
+              doc.clear();
+              doc.to<JsonObject>();
+            }
+            JsonArray alarms =
+                doc["alarms"].is<JsonArray>() ? doc["alarms"].as<JsonArray>() : doc["alarms"].to<JsonArray>();
+
+            std::string name = label;
+            if (name.size() > 32) name = name.substr(0, 32);
+
+            for (JsonVariant value : alarms) {
+              JsonObject alarm = value.as<JsonObject>();
+              if ((alarm["hour"] | -1) != hour || (alarm["minute"] | -1) != minute) continue;
+              if (std::string(alarm["repeat"] | "") != mode) continue;
+              if (mode == "once") alarm["once_at"] = once_at;
+              if (name.empty()) alarm.remove("label");
+              else alarm["label"] = name;
+              std::string encoded;
+              serializeJson(doc, encoded);
+              if (encoded.size() >= id(va_alarms_json).size()) {
+                ESP_LOGE("voice_alarms", "Alarm table exceeds persistence capacity");
+                return;
+              }
+              id(va_alarms_json).fill(0);
+              for (size_t i = 0; i < encoded.size(); ++i) id(va_alarms_json)[i] = encoded[i];
+              ESP_LOGI("voice_alarms", "Updated alarm at %02d:%02d", hour, minute);
+              return;
+            }
+
+            if (alarms.size() >= 30) {
+              ESP_LOGW("voice_alarms", "Refusing to add more than 30 alarms");
+              return;
+            }
+
+            unsigned long highest_id = 0;
+            for (JsonVariant value : alarms) {
+              const std::string existing = value["id"] | "";
+              if (existing.rfind("alarm-", 0) != 0 || existing.size() <= 6) continue;
+              unsigned long number = 0;
+              bool valid = true;
+              for (size_t i = 6; i < existing.size(); ++i) {
+                if (existing[i] < '0' || existing[i] > '9') {
+                  valid = false;
+                  break;
+                }
+                number = number * 10 + (existing[i] - '0');
+              }
+              if (valid && number > highest_id) highest_id = number;
+            }
+            const std::string new_id = "alarm-" + std::to_string(highest_id + 1);
+
+            JsonObject alarm = alarms.add<JsonObject>();
+            alarm["id"] = new_id;
+            alarm["hour"] = hour;
+            alarm["minute"] = minute;
+            alarm["repeat"] = mode;
+            if (mode == "once") alarm["once_at"] = once_at;
+            if (!name.empty()) alarm["label"] = name;
+
+            std::string encoded;
+            serializeJson(doc, encoded);
+            if (encoded.size() >= id(va_alarms_json).size()) {
+              ESP_LOGE("voice_alarms", "Alarm table exceeds persistence capacity");
+              return;
+            }
+            id(va_alarms_json).fill(0);
+            for (size_t i = 0; i < encoded.size(); ++i) id(va_alarms_json)[i] = encoded[i];
+            ESP_LOGI("voice_alarms", "Added alarm %s at %02d:%02d %s", new_id.c_str(), hour, minute, mode.c_str());
+
+    - action: alarm_delete
+      variables:
+        alarm_id: string
+        at: string
+      then:
+        - lambda: |-
+            std::string text = at;
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.erase(text.begin());
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.pop_back();
+            std::string upper = text;
+            for (size_t i = 0; i < upper.size(); ++i)
+              if (upper[i] >= 'a' && upper[i] <= 'z') upper[i] = upper[i] - 'a' + 'A';
+            bool am = false;
+            bool pm = false;
+            if (upper.size() >= 2 && upper.substr(upper.size() - 2) == "AM") {
+              am = true;
+              text = text.substr(0, text.size() - 2);
+            } else if (upper.size() >= 2 && upper.substr(upper.size() - 2) == "PM") {
+              pm = true;
+              text = text.substr(0, text.size() - 2);
+            }
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.erase(text.begin());
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.pop_back();
+
+            bool has_time = false;
+            int hour = -1;
+            int minute = -1;
+            if (!text.empty()) {
+              const size_t colon = text.find(':');
+              const std::string hour_text = colon == std::string::npos ? text : text.substr(0, colon);
+              const std::string minute_text = colon == std::string::npos ? "0" : text.substr(colon + 1);
+              auto parse_number = [](const std::string &value, int &result) -> bool {
+                if (value.empty()) return false;
+                int number = 0;
+                for (size_t i = 0; i < value.size(); ++i) {
+                  if (value[i] < '0' || value[i] > '9') return false;
+                  number = number * 10 + (value[i] - '0');
+                  if (number > 1000) return false;
+                }
+                result = number;
+                return true;
+              };
+              if (!parse_number(hour_text, hour) || !parse_number(minute_text, minute)) {
+                ESP_LOGE("voice_alarms", "Invalid alarm time '%s'", at.c_str());
+                return;
+              }
+              if (am || pm) {
+                if (hour < 1 || hour > 12) {
+                  ESP_LOGE("voice_alarms", "Invalid 12-hour alarm time '%s'", at.c_str());
+                  return;
+                }
+                if (am && hour == 12) hour = 0;
+                else if (pm && hour != 12) hour += 12;
+              }
+              if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+                ESP_LOGE("voice_alarms", "Alarm time out of range '%s'", at.c_str());
+                return;
+              }
+              has_time = true;
+            }
+
+            JsonDocument doc;
+            if (deserializeJson(doc, id(va_alarms_json).data()) || !doc.is<JsonObject>() ||
+                !doc["alarms"].is<JsonArray>()) {
+              ESP_LOGW("voice_alarms", "No alarms to delete");
+              return;
+            }
+            JsonArray alarms = doc["alarms"].as<JsonArray>();
+            JsonDocument fired_doc;
+            const bool have_fired =
+                !deserializeJson(fired_doc, id(va_fired_json).data()) && fired_doc.is<JsonObject>();
+            int removed = 0;
+            for (size_t i = 0; i < alarms.size();) {
+              JsonObject alarm = alarms[i].as<JsonObject>();
+              const std::string candidate = alarm["id"] | "";
+              bool match = false;
+              if (!alarm_id.empty()) match = candidate == alarm_id;
+              else if (has_time)
+                match = (alarm["hour"] | -1) == hour && (alarm["minute"] | -1) == minute;
+              else
+                match = true;
+              if (!match) {
+                ++i;
+                continue;
+              }
+              if (!candidate.empty() && have_fired) fired_doc.remove(candidate);
+              alarms.remove(i);
+              ++removed;
+            }
+            if (removed == 0) {
+              ESP_LOGW("voice_alarms", "No matching alarms");
+              return;
+            }
+
+            std::string encoded;
+            serializeJson(doc, encoded);
+            if (encoded.size() >= id(va_alarms_json).size()) {
+              ESP_LOGE("voice_alarms", "Alarm table exceeds persistence capacity");
+              return;
+            }
+            id(va_alarms_json).fill(0);
+            for (size_t i = 0; i < encoded.size(); ++i) id(va_alarms_json)[i] = encoded[i];
+            if (have_fired) {
+              std::string fired_encoded;
+              serializeJson(fired_doc, fired_encoded);
+              if (fired_encoded.size() < id(va_fired_json).size()) {
+                id(va_fired_json).fill(0);
+                for (size_t i = 0; i < fired_encoded.size(); ++i) id(va_fired_json)[i] = fired_encoded[i];
+              }
+            }
+            ESP_LOGI("voice_alarms", "Deleted %d alarm(s)", removed);
+
+    - action: alarm_list
+      supports_response: only
+      then:
+        - lambda: |-
+            JsonDocument doc;
+            if (deserializeJson(doc, id(va_alarms_json).data()) || !doc.is<JsonObject>() ||
+                !doc["alarms"].is<JsonArray>()) {
+              doc.clear();
+              doc.to<JsonObject>();
+              doc["alarms"].to<JsonArray>();
+            }
+            JsonArray source = doc["alarms"].as<JsonArray>();
+            JsonArray result = root["alarms"].to<JsonArray>();
+            for (JsonVariant value : source) result.add(value);
+            root["count"] = source.size();
+        - api.respond:
+            success: true
+            data: !lambda root["accepted"] = true;
+
+    - action: alarm_stop
+      then:
+        - switch.turn_off: timer_ringing
+
+    - action: alarm_test
+      then:
+        - script.execute: va_ring_alarm
