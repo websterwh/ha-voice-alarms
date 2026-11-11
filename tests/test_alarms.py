@@ -197,7 +197,7 @@ def test_alarm_lambdas_compile_and_run(tmp_path):
     actions = {item["action"]: item for item in config["api"]["actions"]}
     alarm_set = actions["alarm_set"]["then"][0]["lambda"]
     alarm_delete = actions["alarm_delete"]["then"][0]["lambda"]
-    alarm_list = actions["alarm_list"]["then"][0]["lambda"]
+    alarm_list = actions["alarm_list"]["then"][0]["api.respond"]["data"]
     schedule = config["interval"][0]["then"][0]["lambda"]
 
     source = (

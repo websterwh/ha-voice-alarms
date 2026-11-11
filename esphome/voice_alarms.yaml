@@ -530,21 +530,21 @@ api:
     - action: alarm_list
       supports_response: only
       then:
-        - lambda: |-
-            JsonDocument doc;
-            if (deserializeJson(doc, id(va_alarms_json).data()) || !doc.is<JsonObject>() ||
-                !doc["alarms"].is<JsonArray>()) {
-              doc.clear();
-              doc.to<JsonObject>();
-              doc["alarms"].to<JsonArray>();
-            }
-            JsonArray source = doc["alarms"].as<JsonArray>();
-            JsonArray result = root["alarms"].to<JsonArray>();
-            for (JsonVariant value : source) result.add(value);
-            root["count"] = source.size();
         - api.respond:
             success: true
-            data: !lambda root["accepted"] = true;
+            data: !lambda |-
+              JsonDocument doc;
+              if (deserializeJson(doc, id(va_alarms_json).data()) || !doc.is<JsonObject>() ||
+                  !doc["alarms"].is<JsonArray>()) {
+                doc.clear();
+                doc.to<JsonObject>();
+                doc["alarms"].to<JsonArray>();
+              }
+              JsonArray source = doc["alarms"].as<JsonArray>();
+              JsonArray result = root["alarms"].to<JsonArray>();
+              for (JsonVariant value : source) result.add(value);
+              root["count"] = source.size();
+              root["accepted"] = true;
 
     - action: alarm_stop
       then:

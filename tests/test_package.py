@@ -82,6 +82,9 @@ def test_alarm_actions_and_entities_are_present():
     assert set(actions["alarm_set"]["variables"]) == {"at", "days", "label"}
     assert set(actions["alarm_delete"]["variables"]) == {"alarm_id", "at"}
     assert actions["alarm_list"]["supports_response"] == "only"
+    # ESPHome only declares the response JsonObject `root` inside api.respond's data lambda.
+    response = actions["alarm_list"]["then"][0]["api.respond"]["data"]
+    assert 'root["alarms"]' in response and 'root["count"]' in response
 
     assert config["binary_sensor"][0]["id"] == "va_alarm_ringing"
     assert config["button"][0]["id"] == "va_test_alarm_button"
