@@ -147,9 +147,16 @@ button:
     id: va_test_alarm_button
     name: Alarm Test
     icon: mdi:alarm
-    entity_category: config
+    entity_category: diagnostic
+    # Press once to ring and again to silence it.
     on_press:
-      - script.execute: va_ring_alarm
+      - if:
+          condition:
+            switch.is_on: timer_ringing
+          then:
+            - switch.turn_off: timer_ringing
+          else:
+            - script.execute: va_ring_alarm
 
 script:
   # Play the selected sound as a Voice PE announcement. The announcement

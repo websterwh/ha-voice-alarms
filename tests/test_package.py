@@ -108,7 +108,28 @@ def test_alarm_entities_are_grouped_on_the_main_device():
     assert len(alarm_entities) == 5
     for entity in alarm_entities:
         assert "device_id" not in entity, entity
-        assert entity["entity_category"] == "config", entity
+
+    config_entities = {
+        entity["name"] for entity in alarm_entities if entity["entity_category"] == "config"
+    }
+    assert config_entities == {
+        "Alarm Ringing",
+        "Alarm Sound",
+        "Alarm Timeout",
+        "Alarm Volume",
+    }
+
+
+def test_alarm_test_button_stops_a_ringing_alarm():
+    config = load_package()
+    button = config["button"][0]
+    assert button["name"] == "Alarm Test"
+    assert button["entity_category"] == "diagnostic"
+
+    press = button["on_press"][0]["if"]
+    assert press["condition"] == {"switch.is_on": "timer_ringing"}
+    assert press["then"] == [{"switch.turn_off": "timer_ringing"}]
+    assert press["else"] == [{"script.execute": "va_ring_alarm"}]
 
 
 def test_scheduler_is_on_device_and_persisted():

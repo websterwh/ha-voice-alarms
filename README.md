@@ -63,7 +63,7 @@ Changing a substitution requires rebuilding and flashing the firmware. The sound
 
 **Alarm Timeout** is how many minutes an alarm rings before it stops itself. It starts at 10 minutes and can be set from 1 to 30. The package owns the cutoff, so Voice PE's own 15-minute limit on ringing does not apply.
 
-The alarm entities live on the Voice PE's own device page. **Alarm Sound**, **Alarm Volume**, **Alarm Timeout**, **Alarm Ringing** and **Alarm Test** all use the config category and start with "Alarm", so they show up as one run under that page's Configuration card.
+The alarm entities live on the Voice PE's own device page. **Alarm Sound**, **Alarm Volume**, **Alarm Timeout** and **Alarm Ringing** use the config category and start with "Alarm", so they show up as one run under that page's Configuration card. **Alarm Test** sits under Diagnostics, and pressing it while an alarm is ringing stops it.
 
 ## Sounds
 
