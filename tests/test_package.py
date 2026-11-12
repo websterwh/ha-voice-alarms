@@ -95,14 +95,20 @@ def test_alarm_actions_and_entities_are_present():
     assert any(script["id"] == "va_boost_alarm_volume" for script in config["script"])
 
 
-def test_alarm_entities_are_grouped_on_their_own_device():
+def test_alarm_entities_are_grouped_on_the_main_device():
     config = load_package()
-    assert config["esphome"]["devices"] == [{"id": "va_device", "name": "Voice Alarms"}]
+    assert "devices" not in config.get("esphome", {})
 
-    for section in ("number", "select", "binary_sensor", "button"):
-        assert config[section]
-        for entity in config[section]:
-            assert entity["device_id"] == "va_device", entity
+    alarm_entities = [
+        entity
+        for section in ("number", "select", "binary_sensor", "button")
+        for entity in config[section]
+        if entity["name"].startswith("Alarm")
+    ]
+    assert len(alarm_entities) == 5
+    for entity in alarm_entities:
+        assert "device_id" not in entity, entity
+        assert entity["entity_category"] == "config", entity
 
 
 def test_scheduler_is_on_device_and_persisted():
