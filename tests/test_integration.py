@@ -48,10 +48,13 @@ def test_config_flow_targets_an_esphome_alarm_device():
     assert "CONF_PREFIX" in source
     assert "async_set_unique_id" in source
     assert "_abort_if_unique_id_configured" in source
-    assert 'async_abort(reason="no_devices")' in source
+    assert 'reason="already_configured" if prefixes else "no_devices"' in source
+    assert "_async_current_entries" in source
+    assert "prefix not in configured" in source
 
     api = (COMPONENT / "api.py").read_text()
     assert 'endswith(f"_{ALARM_SET}")' in api
+    assert "ALARM_ACTIONS" in api
     assert "parent_device_id" in api
 
 
@@ -80,6 +83,10 @@ def test_commands_map_to_the_package_actions():
     assert '"alarm_test"' in source
     assert '"alarm_list"' in (COMPONENT / "api.py").read_text()
     assert '"days": repeat_value' in source
+    # The generated ESPHome actions mark every variable as required, so the
+    # calls must send all of them even when the value is empty.
+    assert '"label": ""' in source
+    assert '"alarm_id": ""' in source
     assert "async_has_alarm" in source
     # A stored alarm is verified with the device before claiming success.
     assert "if not await api.async_has_alarm(*parsed, repeat_value)" in source

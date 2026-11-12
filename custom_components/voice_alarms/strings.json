@@ -10,7 +10,7 @@
       }
     },
     "abort": {
-      "already_configured": "This alarm device is already configured.",
+      "already_configured": "Every ESPHome device with the Voice Alarms package is already configured.",
       "no_devices": "No ESPHome device with the Voice Alarms package was found. Flash the package, then try again."
     }
   }

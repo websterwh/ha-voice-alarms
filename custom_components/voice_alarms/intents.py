@@ -163,7 +163,9 @@ async def _async_execute(
             return FALLBACK_RESPONSE
         if repeat_value not in REPEATS:
             repeat_value = DEFAULT_REPEAT
-        await api.async_call("alarm_set", {"at": normalized, "days": repeat_value})
+        await api.async_call(
+            "alarm_set", {"at": normalized, "days": repeat_value, "label": ""}
+        )
         if not await api.async_has_alarm(*parsed, repeat_value):
             return FALLBACK_RESPONSE
         return f"Alarm set for {speak_time(*parsed)}{repeat_suffix(repeat_value)}."
@@ -194,7 +196,9 @@ async def _async_execute(
     if operation == "cancel_all":
         if not alarms:
             return "No alarms are set."
-        await api.async_call("alarm_delete")
+        # The package's alarm_delete always takes both variables; empty values
+        # mean "any id" and "any time", which clears the whole table.
+        await api.async_call("alarm_delete", {"alarm_id": "", "at": ""})
         return "All alarms cancelled."
 
     if operation == "cancel":
@@ -206,14 +210,14 @@ async def _async_execute(
                 return FALLBACK_RESPONSE
             if not any(_alarm_time(alarm) == parsed for alarm in alarms):
                 return "No alarm is set for that time."
-            await api.async_call("alarm_delete", {"at": f"{parsed[0]}:{parsed[1]:02d}"})
+            await api.async_call("alarm_delete", {"alarm_id": "", "at": f"{parsed[0]}:{parsed[1]:02d}"})
             return "Alarm cancelled."
         if len(alarms) > 1:
             return "Say which alarm time to cancel, or cancel all alarms."
         parsed = _alarm_time(alarms[0])
         if parsed is None:
             return FALLBACK_RESPONSE
-        await api.async_call("alarm_delete", {"at": f"{parsed[0]}:{parsed[1]:02d}"})
+        await api.async_call("alarm_delete", {"alarm_id": "", "at": f"{parsed[0]}:{parsed[1]:02d}"})
         return "Alarm cancelled."
 
     return FALLBACK_RESPONSE

@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
 
 ALARM_SET = "alarm_set"
+ALARM_ACTIONS = ("alarm_delete", "alarm_list", "alarm_stop", "alarm_test")
 
 
 def prefix_for_name(name: str) -> str:
@@ -21,10 +22,20 @@ def prefix_for_name(name: str) -> str:
 
 @callback
 def async_discover_prefixes(hass: HomeAssistant) -> list[str]:
-    """Return every ESPHome node that exposes the alarm package."""
+    """Return every ESPHome node that exposes the Voice Alarms package.
+
+    Other nodes expose an ``alarm_set`` action of their own (the Echo
+    integration has one with different variables), so a node only counts when
+    the whole package is there.
+    """
     services = hass.services.async_services().get("esphome", {})
+    prefixes = {
+        name[: -len(f"_{ALARM_SET}")] for name in services if name.endswith(f"_{ALARM_SET}")
+    }
     return sorted(
-        {name[: -len(f"_{ALARM_SET}")] for name in services if name.endswith(f"_{ALARM_SET}")}
+        prefix
+        for prefix in prefixes
+        if all(f"{prefix}_{action}" in services for action in ALARM_ACTIONS)
     )
 
 

@@ -28,8 +28,14 @@ class VoiceAlarmsConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Ask which discovered device to control."""
         prefixes = async_discover_prefixes(self.hass)
-        if not prefixes:
-            return self.async_abort(reason="no_devices")
+        configured = {
+            entry.unique_id for entry in self._async_current_entries() if entry.unique_id
+        }
+        available = [prefix for prefix in prefixes if prefix not in configured]
+        if not available:
+            return self.async_abort(
+                reason="already_configured" if prefixes else "no_devices"
+            )
 
         if user_input is not None:
             prefix = user_input[CONF_PREFIX]
@@ -42,7 +48,7 @@ class VoiceAlarmsConfigFlow(ConfigFlow, domain=DOMAIN):
 
         options = [
             SelectOptionDict(value=prefix, label=async_friendly_name(self.hass, prefix))
-            for prefix in prefixes
+            for prefix in available
         ]
         return self.async_show_form(
             step_id="user",
