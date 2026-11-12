@@ -1,0 +1,31 @@
+command:
+  name: Alarm command
+  description: >-
+    Set, cancel, list, test or stop alarms on a Voice Alarms device and return a
+    spoken response. Assist works without this service, the bundled blueprints
+    call it.
+  fields:
+    satellite:
+      name: Satellite
+      description: >-
+        Voice satellite that received the command. Used to choose the alarm
+        device when more than one is configured.
+      selector:
+        entity:
+          domain: assist_satellite
+    operation:
+      name: Operation
+      required: true
+      selector:
+        select:
+          options: [set, stop, cancel, cancel_all, list, test]
+    time:
+      name: Time
+      description: Spoken or numeric time, such as 7 AM or 19:30.
+      selector:
+        text:
+    repeat:
+      name: Repeat
+      selector:
+        select:
+          options: [once, daily, weekdays, weekends]

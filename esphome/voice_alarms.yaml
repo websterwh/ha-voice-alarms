@@ -9,14 +9,21 @@
 # Package options (override in your device substitutions):
 #   va_timezone:     timezone used to evaluate alarm times
 #   va_default_sound: sound used until changed on the Alarm Sound select entity
-#   va_max_ring_time: minutes before an alarm stops itself (Voice PE caps at 15)
+#   va_alarm_volume: initial alarm volume on a fresh device
 #   va_sounds_url:   base URL for the bundled sound files
 
 substitutions:
   va_timezone: America/Los_Angeles
   va_default_sound: Simple Alarm
-  va_max_ring_time: "10"
+  va_alarm_volume: "0.85"
   va_sounds_url: https://raw.githubusercontent.com/websterwh/ha-voice-alarms/master/sounds
+
+# Alarm entities live on their own device in Home Assistant instead of being
+# mixed in with the Voice PE controls.
+esphome:
+  devices:
+    - id: va_device
+      name: Voice Alarms
 
 globals:
   # Persisted alarm table. Shape:
@@ -31,6 +38,11 @@ globals:
     type: std::array<char,2048>
     restore_value: true
     initial_value: 'std::array<char,2048>{}'
+  # Volume to restore after an alarm stops.
+  - id: va_previous_volume
+    type: float
+    restore_value: false
+    initial_value: '0.0'
 
 time:
   - platform: sntp
@@ -73,11 +85,39 @@ audio_file:
   - id: va_sound_squared_waves
     file: ${va_sounds_url}/squared_waves.mp3
 
+number:
+  - platform: template
+    id: va_alarm_volume
+    name: Alarm Volume
+    icon: mdi:volume-high
+    device_id: va_device
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    min_value: 0.4
+    max_value: 0.85
+    step: 0.05
+    initial_value: ${va_alarm_volume}
+  - platform: template
+    id: va_alarm_timeout_minutes
+    name: Alarm Timeout
+    icon: mdi:timer-alert-outline
+    device_id: va_device
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    unit_of_measurement: min
+    initial_value: 10
+
 select:
   - platform: template
     id: voice_alarms_sound
     name: Alarm Sound
     icon: mdi:music-note
+    device_id: va_device
     optimistic: true
     restore_value: true
     entity_category: config
@@ -105,6 +145,7 @@ binary_sensor:
   - platform: template
     id: va_alarm_ringing
     name: Alarm Ringing
+    device_id: va_device
     entity_category: diagnostic
     lambda: return id(timer_ringing).state;
 
@@ -113,6 +154,7 @@ button:
     id: va_test_alarm_button
     name: Test Alarm
     icon: mdi:alarm
+    device_id: va_device
     entity_category: diagnostic
     on_press:
       - script.execute: va_ring_alarm
@@ -124,6 +166,7 @@ script:
     mode: restart
     then:
       - lambda: |-
+          if (!id(timer_ringing).state) return;
           const char *key = "va_sound_simple_alarm";
           switch (id(voice_alarms_sound).active_index().value_or(14)) {
             case 0: key = "va_sound_adrift"; break;
@@ -146,8 +189,35 @@ script:
           }
           id(play_sound).execute(true, key);
 
-  # Enter Voice PE's ringing state, then replace its timer chime with the
-  # selected alarm sound. The second play wins the race against ring_timer.
+  # Raise the media player to at least the configured alarm volume while
+  # ringing, then restore whatever volume was set before the alarm.
+  - id: va_boost_alarm_volume
+    mode: restart
+    then:
+      - if:
+          condition:
+            switch.is_on: timer_ringing
+          then:
+            - lambda: |-
+                id(va_previous_volume) = id(external_media_player).volume;
+                float target = id(va_alarm_volume).state;
+                if (target < id(external_media_player).volume) {
+                  target = id(external_media_player).volume;
+                }
+                id(external_media_player).make_call().set_volume(target).perform();
+            - wait_until:
+                condition:
+                  switch.is_off: timer_ringing
+            - lambda: |-
+                id(external_media_player).make_call().set_volume(id(va_previous_volume)).perform();
+
+  # Enter Voice PE's ringing state, then play the selected sound.
+  #
+  # The state is published directly rather than with switch.turn_on: turning
+  # the switch on runs Voice PE's ring_timer, which plays its own timer chime
+  # and force-stops ringing after 15 minutes. Publishing the state keeps the
+  # stop wake word, center button, LED animation and ducking working while this
+  # package owns both the sound and the timeout.
   - id: va_ring_alarm
     mode: restart
     then:
@@ -155,21 +225,23 @@ script:
           condition:
             switch.is_off: timer_ringing
           then:
-            - switch.turn_on: timer_ringing
-            - delay: 250ms
-            - script.execute: va_play_alarm_sound
-            - delay: 2s
-            - if:
-                condition:
-                  switch.is_on: timer_ringing
-                then:
-                  - script.execute: va_play_alarm_sound
+            - lambda: id(timer_ringing).publish_state(true);
             - script.execute: va_alarm_timeout
+            - script.execute: control_leds
+            - micro_wake_word.enable_model: stop
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 20
+                duration: 0.0s
+            - script.execute: va_boost_alarm_volume
+            - script.execute: enable_repeat_one
+            - script.execute: va_play_alarm_sound
 
   - id: va_alarm_timeout
     mode: restart
     then:
-      - delay: ${va_max_ring_time}min
+      - delay: !lambda |-
+          return static_cast<uint32_t>(id(va_alarm_timeout_minutes).state * 60000.0f);
       - if:
           condition:
             switch.is_on: timer_ringing

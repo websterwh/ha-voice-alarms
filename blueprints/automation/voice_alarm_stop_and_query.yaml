@@ -1,0 +1,143 @@
+blueprint:
+  name: "Voice Alarm: Stop, Cancel & List"
+  description: >
+    Stop a ringing alarm, cancel one or all alarms for this device, or list
+    current alarms. All state changes are delegated to the Voice Alarms
+    integration (voice_alarms.command). No input_text or ringing flag helpers
+    required.
+  domain: automation
+  source_url: https://github.com/websterwh/ha-voice-alarms/blob/master/blueprints/automation/voice_alarm_stop_and_query.yaml
+  homeassistant:
+    min_version: "2026.10.0"
+  input:
+    satellite_devices:
+      name: Satellite Devices
+      description: >
+        All assist_satellite entities this automation should handle. Only the
+        satellite whose device_id matches trigger.device_id will be addressed.
+      selector:
+        entity:
+          domain: assist_satellite
+          multiple: true
+
+variables:
+  satellites: !input satellite_devices
+
+trigger:
+  # Stop a currently ringing alarm on this device.
+  - platform: conversation
+    id: stop
+    command:
+      - "(stop|dismiss|silence|turn off|shut off) [the|my] alarm[s]"
+      - "(stop|dismiss|silence|turn off|shut off) alarm"
+
+  # Cancel an alarm without specifying time. Integration cancels the sole
+  # alarm or asks the user to specify a time.
+  - platform: conversation
+    id: cancel_one
+    command:
+      - "(cancel|delete|remove|clear) [the|my] alarm"
+      - "(cancel|delete|remove|clear) [an|my] alarm"
+
+  # Cancel the alarm at a specific time.
+  - platform: conversation
+    id: cancel_time
+    command:
+      - "(cancel|delete|remove|clear) [the|my] {time} alarm"
+      - "(cancel|delete|remove|clear) [the|my] alarm (for|at) {time}"
+
+  # Cancel every alarm on this device.
+  - platform: conversation
+    id: cancel_all
+    command:
+      - "(cancel|delete|remove|clear) (all|every) [of] [my|the] alarms"
+      - "(cancel|delete|remove|clear) all [my] alarms"
+
+  # List alarms set on this device.
+  - platform: conversation
+    id: list
+    command:
+      - "list [my] alarms"
+      - "what alarms [do I have|are set]"
+      - "which alarms [do I have|are set]"
+      - "[do I have|are there] any alarms"
+
+action:
+  # Resolve which satellite spoke. Reject absent (0 matches) and ambiguous
+  # (2+ matches, i.e. multiple entities share the same device).
+  - variables:
+      satellite_entity: >
+        {% set ns = namespace(found='', count=0) %}
+        {% for sat in satellites %}
+          {% if trigger.device_id is not none and device_id(sat) == trigger.device_id %}
+            {% set ns.found = sat %}
+            {% set ns.count = ns.count + 1 %}
+          {% endif %}
+        {% endfor %}
+        {% if ns.count == 1 %}{{ ns.found }}{% endif %}
+
+  - if:
+      - condition: template
+        value_template: "{{ satellite_entity == '' }}"
+    then:
+      - set_conversation_response: "Sorry, I couldn't identify which satellite you're speaking from."
+      - stop: "Satellite absent or ambiguous."
+
+  # Map trigger id → operation + optional time.
+  # cancel_one sends time='' so the integration can decide whether to cancel
+  # the sole alarm or ask the user to be more specific.
+  - variables:
+      operation_value: list
+      time_value: ""
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: stop
+        sequence:
+          - variables:
+              operation_value: stop
+              time_value: ""
+
+      - conditions:
+          - condition: trigger
+            id: cancel_one
+        sequence:
+          - variables:
+              operation_value: cancel
+              time_value: ""
+
+      - conditions:
+          - condition: trigger
+            id: cancel_time
+        sequence:
+          - variables:
+              operation_value: cancel
+              time_value: "{{ trigger.slots.time }}"
+
+      - conditions:
+          - condition: trigger
+            id: cancel_all
+        sequence:
+          - variables:
+              operation_value: cancel_all
+              time_value: ""
+
+      - conditions:
+          - condition: trigger
+            id: list
+        sequence:
+          - variables:
+              operation_value: list
+              time_value: ""
+
+  - action: voice_alarms.command
+    data:
+      satellite: "{{ satellite_entity }}"
+      operation: "{{ operation_value }}"
+      time: "{{ time_value }}"
+    response_variable: result
+
+  - set_conversation_response: "{{ result.response }}"
+
+mode: queued
+max: 30
