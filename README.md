@@ -63,7 +63,7 @@ Changing a substitution requires rebuilding and flashing the firmware. The sound
 
 **Alarm Timeout** is how many minutes an alarm rings before it stops itself. It starts at 10 minutes and can be set from 1 to 30. The package owns the cutoff, so Voice PE's own 15-minute limit on ringing does not apply.
 
-All alarm entities are grouped on a separate **Voice Alarms** device in Home Assistant instead of being mixed in with the Voice PE controls. **Alarm Sound**, **Alarm Volume** and **Alarm Timeout** appear there under Configuration, with **Alarm Ringing** and **Test Alarm** under Diagnostics.
+The alarm entities live on the Voice PE's own device page. **Alarm Sound**, **Alarm Volume**, **Alarm Timeout**, **Alarm Ringing** and **Alarm Test** all use the config category and start with "Alarm", so they show up as one run under that page's Configuration card.
 
 ## Sounds
 

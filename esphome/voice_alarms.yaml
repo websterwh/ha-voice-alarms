@@ -18,12 +18,9 @@ substitutions:
   va_alarm_volume: "0.85"
   va_sounds_url: https://raw.githubusercontent.com/websterwh/ha-voice-alarms/master/sounds
 
-# Alarm entities live on their own device in Home Assistant instead of being
-# mixed in with the Voice PE controls.
-esphome:
-  devices:
-    - id: va_device
-      name: Voice Alarms
+# Alarm entities stay on the Voice PE's own device page. Their names all start
+# with "Alarm" and they share the config category, so they list as one run in
+# that page's Configuration card.
 
 globals:
   # Persisted alarm table. Shape:
@@ -90,7 +87,6 @@ number:
     id: va_alarm_volume
     name: Alarm Volume
     icon: mdi:volume-high
-    device_id: va_device
     entity_category: config
     optimistic: true
     restore_value: true
@@ -102,7 +98,6 @@ number:
     id: va_alarm_timeout_minutes
     name: Alarm Timeout
     icon: mdi:timer-alert-outline
-    device_id: va_device
     entity_category: config
     optimistic: true
     restore_value: true
@@ -117,7 +112,6 @@ select:
     id: voice_alarms_sound
     name: Alarm Sound
     icon: mdi:music-note
-    device_id: va_device
     optimistic: true
     restore_value: true
     entity_category: config
@@ -145,17 +139,15 @@ binary_sensor:
   - platform: template
     id: va_alarm_ringing
     name: Alarm Ringing
-    device_id: va_device
-    entity_category: diagnostic
+    entity_category: config
     lambda: return id(timer_ringing).state;
 
 button:
   - platform: template
     id: va_test_alarm_button
-    name: Test Alarm
+    name: Alarm Test
     icon: mdi:alarm
-    device_id: va_device
-    entity_category: diagnostic
+    entity_category: config
     on_press:
       - script.execute: va_ring_alarm
 
