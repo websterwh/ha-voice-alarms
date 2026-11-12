@@ -139,7 +139,9 @@ binary_sensor:
   - platform: template
     id: va_alarm_ringing
     name: Alarm Ringing
-    entity_category: config
+    # Home Assistant rejects the config category on binary sensors, so this
+    # sits under Diagnostics next to Alarm Test.
+    entity_category: diagnostic
     lambda: return id(timer_ringing).state;
 
 button:

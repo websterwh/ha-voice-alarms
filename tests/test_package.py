@@ -112,12 +112,12 @@ def test_alarm_entities_are_grouped_on_the_main_device():
     config_entities = {
         entity["name"] for entity in alarm_entities if entity["entity_category"] == "config"
     }
-    assert config_entities == {
-        "Alarm Ringing",
-        "Alarm Sound",
-        "Alarm Timeout",
-        "Alarm Volume",
+    assert config_entities == {"Alarm Sound", "Alarm Timeout", "Alarm Volume"}
+
+    diagnostic_entities = {
+        entity["name"] for entity in alarm_entities if entity["entity_category"] == "diagnostic"
     }
+    assert diagnostic_entities == {"Alarm Ringing", "Alarm Test"}
 
 
 def test_alarm_test_button_stops_a_ringing_alarm():
