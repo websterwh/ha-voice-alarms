@@ -32,10 +32,11 @@ def async_discover_prefixes(hass: HomeAssistant) -> list[str]:
 def async_friendly_name(hass: HomeAssistant, prefix: str) -> str:
     """Return the Home Assistant device name for an ESPHome service prefix."""
     registry = dr.async_get(hass)
-    for device in registry.devices.values():
-        for name in (device.name_by_user, device.name):
-            if name and prefix_for_name(name) == prefix:
-                return name
+    for entry in hass.config_entries.async_entries("esphome"):
+        for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+            for name in (device.name_by_user, device.name):
+                if name and prefix_for_name(name) == prefix:
+                    return name
     return prefix.replace("_", " ").title()
 
 
