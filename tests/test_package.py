@@ -140,7 +140,9 @@ def test_alarm_state_ignores_native_timers():
 
     ringing = config["binary_sensor"][0]
     assert ringing["name"] == "Alarm Ringing"
-    assert ringing["update_interval"] == "1s"
+    # Template binary sensors re-evaluate their lambda every loop; the platform
+    # has no update_interval option.
+    assert "update_interval" not in ringing
     assert "va_alarm_active" in ringing["lambda"]
     assert "timer_ringing" in ringing["lambda"]
 
