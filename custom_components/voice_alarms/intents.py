@@ -19,7 +19,7 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from .api import AlarmApi, async_resolve_api
-from .const import DEFAULT_REPEAT, FALLBACK_RESPONSE, REPEATS
+from .const import DEFAULT_REPEAT, FALLBACK_RESPONSE, NEED_TIME_RESPONSE, REPEATS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ async def _async_execute(
         normalized = normalize_time(spoken_time)
         parsed = parse_time(normalized)
         if parsed is None:
-            return FALLBACK_RESPONSE
+            return NEED_TIME_RESPONSE
         if repeat_value not in REPEATS:
             repeat_value = DEFAULT_REPEAT
         await api.async_call(

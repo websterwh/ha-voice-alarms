@@ -148,3 +148,11 @@ def test_hacs_metadata_is_present():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert hacs["name"] == "Voice Alarms"
     assert hacs["homeassistant"]
+
+
+def test_a_duration_asks_for_a_clock_time_instead_of_the_fallback():
+    """'Set an alarm for one minute' is a timer request, not an unread alarm."""
+    assert "Alarms need a time of day" in (COMPONENT / "const.py").read_text()
+    source = INTENTS.read_text()
+    set_branch = source.split('if operation == "set":', 1)[1]
+    assert "return NEED_TIME_RESPONSE" in set_branch.split('if operation == "stop"', 1)[0]

@@ -20,3 +20,8 @@ DEFAULT_REPEAT = "once"
 # Used for every rejected or failed command so the assistant never answers with
 # a stack trace or a half-understood request.
 FALLBACK_RESPONSE = "Sorry, I didn't get that."
+
+# "Set an alarm for one minute" is a timer, not an alarm: there is no clock time
+# to store. Saying what is missing beats the generic fallback, which sounds like
+# the request was not heard at all.
+NEED_TIME_RESPONSE = "Alarms need a time of day, like 7 AM."
