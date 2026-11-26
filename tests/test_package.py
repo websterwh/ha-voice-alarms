@@ -236,3 +236,10 @@ def test_validation_fixture_uses_the_package_and_local_sounds():
     )
     assert fixture["packages"]["voice_alarms"] == "../esphome/voice_alarms.yaml"
     assert fixture["substitutions"]["va_sounds_url"] == "../sounds"
+
+
+def test_loop_task_stack_covers_the_package_boot_footprint():
+    """Restoring the alarm table plus the package's entities overflows 8 KB."""
+    config = load_package()
+    advanced = config["esp32"]["framework"]["advanced"]
+    assert advanced["loop_task_stack_size"] >= 12288

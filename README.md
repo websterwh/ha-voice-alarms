@@ -141,6 +141,11 @@ Voice control is handled by the Home Assistant integration described above; the 
 - Missed one-time alarms are not replayed. A one-time alarm is removed after its firing minute.
 - Ringing sets Voice PE's `timer_ringing` state directly, so the stop wake word, center button, LED animation and ducking behave like a timer without playing Voice PE's timer chime. The alarm actions only act while an alarm is ringing, so they never cancel a native timer; the stop wake word and center button are Voice PE's own and end whatever is ringing. An alarm that comes due while a timer is already ringing is marked as fired without replacing that timer's sound.
 - The stop wake word, any detected wake word, the center button, and the `alarm_stop` action all dismiss a ringing alarm. The LED ring uses Voice PE's timer-ring animation.
+- Alarms and every entity this package adds run on ESPHome's loop task, so the package raises
+  `loop_task_stack_size` to 12 KB (`esp32: framework: advanced:`). Its boot footprint measured
+  about 8.3 KB of loop stack on a fully loaded Voice PE; the stock 8 KB aborts in
+  `vApplicationStackOverflowHook`, so the boot never marks itself successful and the bootloader
+  rolls the firmware back. Keep the setting if you merge this package into your own config.
 - The package is intended for Voice PE, because it depends on that firmware's `timer_ringing`, `play_sound`, `external_media_player` and `audio_file` definitions. It is not a generic alarm component for other ESPHome devices.
 - Do not rely on this as a safety-critical alarm clock. Power loss before a flash write completes can lose the most recent change.
 

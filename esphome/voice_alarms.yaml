@@ -18,6 +18,17 @@ substitutions:
   va_alarm_volume: "0.85"
   va_sounds_url: https://raw.githubusercontent.com/websterwh/ha-voice-alarms/master/sounds
 
+# Everything this package schedules runs on ESPHome's loop task, and its
+# boot-time footprint (restored alarm table, five API actions, 25 more entities,
+# 17 embedded sounds) measures about 8.3 KB of stack on a fully loaded Voice PE.
+# The stock 8 KB loop stack overflows there: the device aborts in
+# vApplicationStackOverflowHook before the boot is marked successful and the
+# bootloader rolls the firmware back. 12 KB leaves roughly 4 KB of headroom.
+esp32:
+  framework:
+    advanced:
+      loop_task_stack_size: 12288
+
 # Alarm entities stay on the Voice PE's own device page. Their names all start
 # with "Alarm" and they share the config category, so they list as one run in
 # that page's Configuration card.
