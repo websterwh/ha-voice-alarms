@@ -40,6 +40,13 @@ globals:
     type: float
     restore_value: false
     initial_value: '0.0'
+  # True only while this package is ringing an alarm. Voice PE rings native
+  # timers through the same timer_ringing switch, so alarm entities and actions
+  # check this flag instead of treating every ring as an alarm.
+  - id: va_alarm_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 time:
   - platform: sntp
@@ -140,9 +147,11 @@ binary_sensor:
     id: va_alarm_ringing
     name: Alarm Ringing
     # Home Assistant rejects the config category on binary sensors, so this
-    # sits under Diagnostics next to Alarm Test.
+    # sits under Diagnostics next to Alarm Test. Only alarms started here count;
+    # a native timer ringing on the same switch leaves this off.
     entity_category: diagnostic
-    lambda: return id(timer_ringing).state;
+    update_interval: 1s
+    lambda: return id(va_alarm_active) && id(timer_ringing).state;
 
 button:
   - platform: template
@@ -150,11 +159,12 @@ button:
     name: Alarm Test
     icon: mdi:alarm
     entity_category: diagnostic
-    # Press once to ring and again to silence it.
+    # Press once to ring and again to silence the alarm. A native timer that
+    # happens to be ringing keeps going.
     on_press:
       - if:
           condition:
-            switch.is_on: timer_ringing
+            lambda: return id(va_alarm_active) && id(timer_ringing).state;
           then:
             - switch.turn_off: timer_ringing
           else:
@@ -210,6 +220,7 @@ script:
                 condition:
                   switch.is_off: timer_ringing
             - lambda: |-
+                id(va_alarm_active) = false;
                 id(external_media_player).make_call().set_volume(id(va_previous_volume)).perform();
 
   # Enter Voice PE's ringing state, then play the selected sound.
@@ -226,6 +237,7 @@ script:
           condition:
             switch.is_off: timer_ringing
           then:
+            - lambda: id(va_alarm_active) = true;
             - lambda: id(timer_ringing).publish_state(true);
             - script.execute: va_alarm_timeout
             - script.execute: control_leds
@@ -621,7 +633,12 @@ api:
 
     - action: alarm_stop
       then:
-        - switch.turn_off: timer_ringing
+        # Never cancel a native timer that is ringing.
+        - if:
+            condition:
+              lambda: return id(va_alarm_active) && id(timer_ringing).state;
+            then:
+              - switch.turn_off: timer_ringing
 
     - action: alarm_test
       then:

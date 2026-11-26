@@ -65,6 +65,8 @@ Changing a substitution requires rebuilding and flashing the firmware. The sound
 
 The alarm entities live on the Voice PE's own device page. **Alarm Sound**, **Alarm Volume** and **Alarm Timeout** use the config category and start with "Alarm", so they show up as one run under that page's Configuration card. **Alarm Ringing** and **Alarm Test** sit under Diagnostics, and pressing **Alarm Test** while an alarm is ringing stops it.
 
+Native timers stay with the Voice PE package. Alarms and timers both ring through Voice PE's `timer_ringing` switch, so the package tracks its own ringing separately: **Alarm Ringing** only turns on for alarms it started, and neither **Alarm Test** nor `alarm_stop` silences a timer.
+
 ## Sounds
 
 Seventeen sounds are bundled in `sounds/` and embedded at build time:
@@ -137,7 +139,7 @@ Voice control is handled by the Home Assistant integration described above; the 
 
 - Alarms are persisted in flash and can ring without Home Assistant, but the device must first synchronize its clock over SNTP. There is no battery-backed RTC, so alarms cannot run before a clock sync after a cold boot.
 - Missed one-time alarms are not replayed. A one-time alarm is removed after its firing minute.
-- Ringing sets Voice PE's `timer_ringing` state directly, so the stop wake word, center button, LED animation and ducking behave like a timer without playing Voice PE's timer chime. Stopping an alarm also stops a timer ringing at the same moment, and an alarm that comes due while a timer is already ringing is marked as fired without replacing that timer's sound.
+- Ringing sets Voice PE's `timer_ringing` state directly, so the stop wake word, center button, LED animation and ducking behave like a timer without playing Voice PE's timer chime. The alarm actions only act while an alarm is ringing, so they never cancel a native timer; the stop wake word and center button are Voice PE's own and end whatever is ringing. An alarm that comes due while a timer is already ringing is marked as fired without replacing that timer's sound.
 - The stop wake word, any detected wake word, the center button, and the `alarm_stop` action all dismiss a ringing alarm. The LED ring uses Voice PE's timer-ring animation.
 - The package is intended for Voice PE, because it depends on that firmware's `timer_ringing`, `play_sound`, `external_media_player` and `audio_file` definitions. It is not a generic alarm component for other ESPHome devices.
 - Do not rely on this as a safety-critical alarm clock. Power loss before a flash write completes can lose the most recent change.

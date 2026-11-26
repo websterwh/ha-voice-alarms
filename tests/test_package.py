@@ -127,9 +127,42 @@ def test_alarm_test_button_stops_a_ringing_alarm():
     assert button["entity_category"] == "diagnostic"
 
     press = button["on_press"][0]["if"]
-    assert press["condition"] == {"switch.is_on": "timer_ringing"}
+    condition = press["condition"]["lambda"]
+    assert "va_alarm_active" in condition
+    assert "timer_ringing" in condition
     assert press["then"] == [{"switch.turn_off": "timer_ringing"}]
     assert press["else"] == [{"script.execute": "va_ring_alarm"}]
+
+
+def test_alarm_state_ignores_native_timers():
+    """Timers ring through the same switch, so the alarm package must not claim them."""
+    config = load_package()
+
+    ringing = config["binary_sensor"][0]
+    assert ringing["name"] == "Alarm Ringing"
+    assert ringing["update_interval"] == "1s"
+    assert "va_alarm_active" in ringing["lambda"]
+    assert "timer_ringing" in ringing["lambda"]
+
+    globals_by_id = {entry["id"]: entry for entry in config["globals"]}
+    assert globals_by_id["va_alarm_active"]["restore_value"] is False
+    assert globals_by_id["va_alarm_active"]["initial_value"] == "false"
+
+    ring = next(script for script in config["script"] if script["id"] == "va_ring_alarm")
+    actions = ring["then"][0]["if"]["then"]
+    assert any("va_alarm_active) = true" in (action.get("lambda") or "") for action in actions)
+
+    boost = next(script for script in config["script"] if script["id"] == "va_boost_alarm_volume")
+    restore = boost["then"][0]["if"]["then"][2]["lambda"]
+    assert "va_alarm_active) = false" in restore
+    assert "set_volume(id(va_previous_volume))" in restore
+
+    stop = next(
+        action for action in config["api"]["actions"] if action["action"] == "alarm_stop"
+    )
+    guarded = stop["then"][0]["if"]
+    assert "va_alarm_active" in guarded["condition"]["lambda"]
+    assert guarded["then"] == [{"switch.turn_off": "timer_ringing"}]
 
 
 def test_scheduler_is_on_device_and_persisted():
